@@ -174,18 +174,15 @@ class TrainOverlay:
         self.popup.overrideredirect(True)
         self.popup.grab_set() 
         
-        # INCREASED SIZE FOR PROMINENCE
         pw, ph = 500, 180
         x = parent.winfo_x() + (parent.winfo_width() // 2) - (pw // 2)
         y = parent.winfo_y() + (parent.winfo_height() // 2) - (ph // 2)
         self.popup.geometry(f"{pw}x{ph}+{x}+{y}")
         self.popup.configure(bg="#1E1E1E", highlightthickness=2, highlightbackground=ACCENT)
         
-        # BOLDER & LARGER TITLE
         self.lbl_title = tk.Label(self.popup, text="🧠 TRAINING OCSVM MODEL", font=("Segoe UI", 16, "bold"), fg="#FFFFFF", bg="#1E1E1E")
         self.lbl_title.pack(pady=(25, 15))
         
-        # LARGER INTUITIVE LOG TEXT
         self.lbl_log = tk.Label(self.popup, text="Initializing...", font=("Segoe UI", 12, "bold"), fg=SUCCESS, bg="#1E1E1E")
         self.lbl_log.pack(pady=(0, 15))
         
@@ -214,7 +211,9 @@ class SmartWaveTrainer(tk.Tk):
         self.is_cancelled = False
         self.is_processing = False
         self.X_cache = None
+        self.X_abnormal_cache = None
         self.last_audio_cache = None
+        self.last_abnormal_audio_cache = None
         self.scaler_cache = None
         self.ocsvm_cache = None
         
@@ -255,7 +254,7 @@ class SmartWaveTrainer(tk.Tk):
         self.equip_var = tk.StringVar(value="Motor")
         ttk.Combobox(zone1, textvariable=self.equip_var, values=["Motor", "Conveyor", "Pump", "Fan", "RoboticArm"], font=("Segoe UI", 9), width=15).grid(row=0, column=1, sticky='w', pady=5, padx=10)
         
-        self.btn_load = tk.Button(zone1, text="📂 EXTRACT FEATURES", bg=LOAD_BG, fg="white", font=("Segoe UI", 10, "bold"), width=22, cursor="hand2", command=self.start_load_thread)
+        self.btn_load = tk.Button(zone1, text="📂 EXTRACT FEATURES", bg=LOAD_BG, fg="white", font=("Segoe UI", 10, "bold"), width=22, cursor="hand2", command=lambda: self.start_load_thread('normal'))
         self.btn_load.grid(row=1, column=0, columnspan=2, pady=5)
         
         if self.engine is None:
@@ -279,6 +278,10 @@ class SmartWaveTrainer(tk.Tk):
         
         self.btn_train = tk.Button(zone3, text="🧠 FIT OCSVM BOUNDARY", bg=DISABLED_BG, fg=DISABLED_FG, font=("Segoe UI", 10, "bold"), width=22, state=tk.DISABLED, cursor="hand2", command=self.action_train_ocsvm)
         self.btn_train.pack(pady=5)
+        
+        # NEW EVALUATE BUTTON
+        self.btn_evaluate = tk.Button(zone3, text="🚨 EVALUATE ABNORMAL", bg=DISABLED_BG, fg=DISABLED_FG, font=("Segoe UI", 10, "bold"), width=22, state=tk.DISABLED, cursor="hand2", command=lambda: self.start_load_thread('abnormal'))
+        self.btn_evaluate.pack(pady=5)
         
         self.btn_export = tk.Button(zone3, text="🚀 EXPORT TO DEVICE", bg=DISABLED_BG, fg=DISABLED_FG, font=("Segoe UI", 10, "bold"), width=22, state=tk.DISABLED, cursor="hand2", command=self.action_export_model)
         self.btn_export.pack(pady=5)
@@ -338,61 +341,65 @@ class SmartWaveTrainer(tk.Tk):
         self.overlay.append_mini_log("! > SIGNAL: SIGINT received. Halting extraction...")
         self.safe_log("[WRN] Stop signal received. Halting process...")
 
-    def start_load_thread(self):
-        """Initiates the dataset loading and embedding thread."""
+    def start_load_thread(self, target_type='normal'):
+        """Initiates the dataset loading and embedding thread for normal or abnormal data."""
         if self.is_processing:
             return
             
-        dataset_dir = filedialog.askdirectory(title="Select Dataset Folder")
+        dataset_dir = filedialog.askdirectory(title=f"Select Dataset Folder (Must contain '{target_type}' folder)")
         if not dataset_dir: return
         
-        normal_dir = os.path.join(dataset_dir, 'normal')
-        if not os.path.exists(normal_dir):
-            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing in {dataset_dir}.", is_error=True)
-            messagebox.showerror("Folder Error", f"Cannot find 'normal' folder inside:\n{dataset_dir}")
+        target_dir = os.path.join(dataset_dir, target_type)
+        if not os.path.exists(target_dir):
+            self.safe_log(f"[ERR] Validation Failed: '{target_type}' directory missing in {dataset_dir}.", is_error=True)
+            messagebox.showerror("Folder Error", f"Cannot find '{target_type}' folder inside:\n{dataset_dir}")
             return
             
         self.is_processing = True
         self.is_cancelled = False
         
-        self.btn_load.config(state=tk.DISABLED, text="PROCESSING...", bg=MUTED)
+        if target_type == 'normal':
+            self.btn_load.config(state=tk.DISABLED, text="PROCESSING...", bg=MUTED)
+        else:
+            self.btn_evaluate.config(state=tk.DISABLED, text="EVALUATING...", bg=MUTED)
+            
         self.btn_train.config(state=tk.DISABLED, bg=DISABLED_BG, fg=DISABLED_FG)
         self.btn_export.config(state=tk.DISABLED, bg=DISABLED_BG, fg=DISABLED_FG)
         
         self.overlay = LoadingOverlay(self, cancel_callback=self._cancel_process)
         
-        thread = threading.Thread(target=self._load_task, args=(normal_dir,), daemon=True)
+        thread = threading.Thread(target=self._load_task, args=(target_dir, target_type), daemon=True)
         thread.start()
 
-    def _load_task(self, normal_dir):
+    def _load_task(self, target_dir, target_type):
         """Background thread logic for loading and embedding WAV files."""
         def read_wav(p):
             with wave.open(p, 'rb') as w:
                 return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
 
-        self.safe_log(f"\n[SYS] Feature Extraction started from: {normal_dir}")
-        self.after(0, self.overlay.update_state, "[PRC] Parsing .wav files...", 0)
+        self.safe_log(f"\n[SYS] Feature Extraction started from: {target_dir}")
+        self.after(0, self.overlay.update_state, f"[PRC] Parsing {target_type} .wav files...", 0)
         
         X = []
-        files = [f for f in os.listdir(normal_dir) if f.endswith('.wav')]
+        files = [f for f in os.listdir(target_dir) if f.endswith('.wav')]
         total_files = len(files)
         last_audio = None
         
         if total_files == 0:
-            self.safe_log("[ERR] No .wav files found in directory.", is_error=True)
-            self.after(0, lambda: messagebox.showwarning("Empty Folder", "No .wav files were found in the selected folder."))
-            self.after(0, self._reset_load_ui)
+            self.safe_log(f"[ERR] No .wav files found in {target_dir}.", is_error=True)
+            self.after(0, lambda: messagebox.showwarning("Empty Folder", f"No .wav files were found in '{target_type}' folder."))
+            self.after(0, self._reset_load_ui, target_type)
             return
 
         start_time = time.time()
         for i, f in enumerate(files):
             if self.is_cancelled:
                 self.safe_log("[WRN] Operation aborted during feature extraction.")
-                self.after(0, self._reset_load_ui)
+                self.after(0, self._reset_load_ui, target_type)
                 return
                 
             try:
-                audio = read_wav(os.path.join(normal_dir, f))
+                audio = read_wav(os.path.join(target_dir, f))
                 if i == total_files - 1: last_audio = audio
                 emb = self.engine.extract_clip_embedding(audio)
                 X.append(emb)
@@ -419,30 +426,51 @@ class SmartWaveTrainer(tk.Tk):
         if len(X) == 0:
             self.safe_log("[ERR] Failed to extract features from any files.", is_error=True)
             self.after(0, lambda: messagebox.showerror("Extraction Failed", "Could not extract features. Check file format."))
-            self.after(0, self._reset_load_ui)
+            self.after(0, self._reset_load_ui, target_type)
             return
 
-        self.X_cache = np.array(X)
-        self.last_audio_cache = last_audio
+        if target_type == 'normal':
+            self.X_cache = np.array(X)
+            self.last_audio_cache = last_audio
+        else:
+            self.X_abnormal_cache = np.array(X)
+            self.last_abnormal_audio_cache = last_audio
         
-        self.safe_log(f"[OUT] Extracted Matrix Shape: {self.X_cache.shape}")
+        self.safe_log(f"[OUT] Extracted Matrix Shape: {np.array(X).shape}")
         self.after(0, self.overlay.append_mini_log, f"> Matrix perfectly extracted in {time.time()-start_time:.1f}s.")
         time.sleep(0.5)
         
-        self.after(0, self._finalize_load)
+        self.after(0, self._finalize_load, target_type)
 
-    def _reset_load_ui(self):
+    def _reset_load_ui(self, target_type='normal'):
         """Resets the UI state if loading is cancelled or fails."""
         try: self.overlay.close()
         except: pass
-        self.btn_load.config(state=tk.NORMAL, text="📂 EXTRACT FEATURES", bg=LOAD_BG)
+        if target_type == 'normal':
+            self.btn_load.config(state=tk.NORMAL, text="📂 EXTRACT FEATURES", bg=LOAD_BG)
+        else:
+            self.btn_evaluate.config(state=tk.NORMAL, text="🚨 EVALUATE ABNORMAL", bg=DANGER)
+            self.btn_train.config(state=tk.NORMAL, bg=ACCENT, fg="white")
+            self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
         self.is_processing = False
 
-    def _finalize_load(self):
-        """Completes the loading process and unlocks the Train button."""
-        self._reset_load_ui()
-        self.btn_train.config(state=tk.NORMAL, bg=ACCENT, fg="white")
-        self.safe_log("[SYS] Features extracted and loaded into memory. Ready to fit boundary.")
+    def _finalize_load(self, target_type):
+        """Completes the loading process and unlocks the next buttons."""
+        try: self.overlay.close()
+        except: pass
+        self.is_processing = False
+        
+        if target_type == 'normal':
+            self.btn_load.config(state=tk.NORMAL, text="📂 EXTRACT FEATURES", bg=LOAD_BG)
+            self.btn_train.config(state=tk.NORMAL, bg=ACCENT, fg="white")
+            self.safe_log("[SYS] Normal features loaded. Ready to fit boundary.")
+        else:
+            self.btn_evaluate.config(state=tk.NORMAL, text="🚨 EVALUATE ABNORMAL", bg=DANGER)
+            self.btn_train.config(state=tk.NORMAL, bg=ACCENT, fg="white")
+            self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+            self.safe_log("\n[SYS] Abnormal features loaded. Rendering anomalies on chart...")
+            if self.scaler_cache and self.X_cache is not None:
+                self._draw_charts(self.scaler_cache.transform(self.X_cache))
         
     def action_train_ocsvm(self):
         """Fits OCSVM with a deliberate 'Labor Illusion' delay for UX purposes."""
@@ -508,21 +536,30 @@ class SmartWaveTrainer(tk.Tk):
         try: self.train_overlay.close()
         except: pass
         self.btn_train.config(state=tk.NORMAL, text="🧠 FIT OCSVM BOUNDARY", bg=ACCENT)
-        self._draw_charts(X_scaled)
+        self.btn_evaluate.config(state=tk.NORMAL, bg=DANGER, fg="white")
         self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+        self._draw_charts(X_scaled)
         self.is_processing = False
 
     def _draw_charts(self, X_scaled):
-        """Renders the 3 parallel charts."""
+        """Renders the 3 parallel charts, overlaying abnormal data if it exists."""
+        # 1. Wave Chart
         self.ax_wave.clear()
         if self.last_audio_cache is not None:
             plot_len = min(len(self.last_audio_cache), SAMPLE_RATE)
-            self.ax_wave.plot(self.last_audio_cache[:plot_len], color=MUTED, alpha=0.8, linewidth=0.8)
+            self.ax_wave.plot(self.last_audio_cache[:plot_len], color=MUTED, alpha=0.8, linewidth=0.8, label="Normal Wave")
+            
+            if self.last_abnormal_audio_cache is not None:
+                ab_plot_len = min(len(self.last_abnormal_audio_cache), SAMPLE_RATE)
+                self.ax_wave.plot(self.last_abnormal_audio_cache[:ab_plot_len], color=DANGER, alpha=0.6, linewidth=0.8, label="Abnormal Wave")
+                
             self.ax_wave.set_title('Raw Audio Waveform (1 sec)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_wave.set_xlabel('Time (Samples)', fontsize=9)
             self.ax_wave.set_ylabel('Amplitude', fontsize=9)
+            self.ax_wave.legend(loc='upper right', fontsize=8)
             self.ax_wave.grid(True, linestyle='--', alpha=0.3)
             
+        # 2. Fingerprint Chart
         self.ax_fingerprint.clear()
         if self.X_cache is not None and len(self.X_cache) > 0:
             X_mean = np.mean(self.X_cache, axis=0)
@@ -530,22 +567,32 @@ class SmartWaveTrainer(tk.Tk):
             bands = np.arange(len(X_mean))
             
             self.ax_fingerprint.fill_between(bands, X_mean - X_std, X_mean + X_std, color=MUTED, alpha=0.25, label='Normal Variance')
-            self.ax_fingerprint.plot(bands, X_mean, color=ACCENT, linewidth=2, label='Healthy Baseline')
+            self.ax_fingerprint.plot(bands, X_mean, color=ACCENT, linewidth=2, label='Normal Baseline')
             
+            if self.X_abnormal_cache is not None and len(self.X_abnormal_cache) > 0:
+                Ab_mean = np.mean(self.X_abnormal_cache, axis=0)
+                self.ax_fingerprint.plot(bands, Ab_mean, color=DANGER, linewidth=2, linestyle='--', label='Anomaly Signature')
+                
             self.ax_fingerprint.set_title(f'Deep Acoustic Fingerprint ({EMBEDDING_DIM}-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_fingerprint.set_xlabel('CNN10 Feature Dimensions', fontsize=9)
             self.ax_fingerprint.set_ylabel('Normalized Energy', fontsize=9)
             self.ax_fingerprint.legend(loc='upper right', fontsize=8)
             self.ax_fingerprint.grid(True, linestyle='--', alpha=0.3)
             
+        # 3. PCA Chart
         self.ax_pca.clear()
-        if X_scaled.shape[1] >= 2 and self.ocsvm_cache is not None:
+        if X_scaled is not None and X_scaled.shape[1] >= 2 and self.ocsvm_cache is not None:
             pca = PCA(n_components=2)
             X_pca = pca.fit_transform(X_scaled)
             sv_pca = X_pca[self.ocsvm_cache.support_]
             
-            self.ax_pca.scatter(X_pca[:, 0], X_pca[:, 1], c=SUCCESS, alpha=0.6, label='Normal Embeddings')
-            self.ax_pca.scatter(sv_pca[:, 0], sv_pca[:, 1], c=DANGER, edgecolors='white', s=60, label='Support Vectors')
+            self.ax_pca.scatter(X_pca[:, 0], X_pca[:, 1], c=SUCCESS, alpha=0.6, label='Normal Data')
+            self.ax_pca.scatter(sv_pca[:, 0], sv_pca[:, 1], c=WARNING_COL, edgecolors='white', s=60, label='Support Vectors')
+            
+            if self.X_abnormal_cache is not None:
+                Ab_scaled = self.scaler_cache.transform(self.X_abnormal_cache)
+                Ab_pca = pca.transform(Ab_scaled)
+                self.ax_pca.scatter(Ab_pca[:, 0], Ab_pca[:, 1], c='#000000', marker='x', s=60, label='Abnormal (Anomalies)')
             
             xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
                                  np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
