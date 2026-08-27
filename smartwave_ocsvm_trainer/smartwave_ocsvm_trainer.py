@@ -167,6 +167,42 @@ class LoadingOverlay:
         self.popup.grab_release()
         self.popup.destroy()
 
+class TrainOverlay:
+    """Mini overlay for OCSVM Training Labor Illusion"""
+    def __init__(self, parent):
+        self.popup = tk.Toplevel(parent)
+        self.popup.overrideredirect(True)
+        self.popup.grab_set() 
+        
+        # INCREASED SIZE FOR PROMINENCE
+        pw, ph = 500, 180
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (pw // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (ph // 2)
+        self.popup.geometry(f"{pw}x{ph}+{x}+{y}")
+        self.popup.configure(bg="#1E1E1E", highlightthickness=2, highlightbackground=ACCENT)
+        
+        # BOLDER & LARGER TITLE
+        self.lbl_title = tk.Label(self.popup, text="🧠 TRAINING OCSVM MODEL", font=("Segoe UI", 16, "bold"), fg="#FFFFFF", bg="#1E1E1E")
+        self.lbl_title.pack(pady=(25, 15))
+        
+        # LARGER INTUITIVE LOG TEXT
+        self.lbl_log = tk.Label(self.popup, text="Initializing...", font=("Segoe UI", 12, "bold"), fg=SUCCESS, bg="#1E1E1E")
+        self.lbl_log.pack(pady=(0, 15))
+        
+        style = ttk.Style()
+        style.configure("Mini.Horizontal.TProgressbar", background=ACCENT, troughcolor="#333333", bordercolor="#1E1E1E", thickness=8)
+        self.progress_var = tk.DoubleVar()
+        self.pbar = ttk.Progressbar(self.popup, variable=self.progress_var, maximum=100, length=400, style="Mini.Horizontal.TProgressbar")
+        self.pbar.pack()
+
+    def update_state(self, log_msg, progress):
+        self.lbl_log.config(text=log_msg)
+        self.progress_var.set(progress)
+
+    def close(self):
+        self.popup.grab_release()
+        self.popup.destroy()
+
 class SmartWaveTrainer(tk.Tk):
     """Main Application GUI for SmartWave OCSVM Trainer"""
     def __init__(self):
@@ -282,7 +318,6 @@ class SmartWaveTrainer(tk.Tk):
         self.after(0, self._append_log, msg, is_error)
 
     def _append_log(self, msg, is_error=False):
-        # Add visual distinction for errors
         if is_error:
             msg = f"❌ {msg}"
             
@@ -363,10 +398,9 @@ class SmartWaveTrainer(tk.Tk):
                 X.append(emb)
             except Exception as e:
                 self.safe_log(f"[ERR] Failed reading {f}: {str(e)}", is_error=True)
-                # Log traceback to file but don't show full traceback in UI log
                 with open("trainer_history.log", 'a', encoding='utf-8') as logf:
                     logf.write(traceback.format_exc() + "\n")
-                continue # Safely skip corrupted files
+                continue 
             
             if i % 3 == 0 or i == total_files - 1:
                 short_f = (f[:12] + '..') if len(f) > 14 else f.ljust(14)
@@ -411,7 +445,7 @@ class SmartWaveTrainer(tk.Tk):
         self.safe_log("[SYS] Features extracted and loaded into memory. Ready to fit boundary.")
         
     def action_train_ocsvm(self):
-        """Fits OCSVM instantly from memory and redraws charts."""
+        """Fits OCSVM with a deliberate 'Labor Illusion' delay for UX purposes."""
         if self.is_processing or self.X_cache is None: return
         self.is_processing = True
         
@@ -421,32 +455,62 @@ class SmartWaveTrainer(tk.Tk):
             self.is_processing = False
             return
             
+        self.btn_train.config(state=tk.DISABLED, text="OPTIMIZING...", bg=MUTED)
+        self.train_overlay = TrainOverlay(self)
+        
+        thread = threading.Thread(target=self._train_task_fake_delay, daemon=True)
+        thread.start()
+
+    def _train_task_fake_delay(self):
         try:
-            self.safe_log(f"\n[PRC] Fitting OCSVM Boundary instantly from memory cache...")
-            gamma = self.gamma_var.get()
-            nu = self.nu_var.get()
+            # 1. Standardizing (Fake delay: 1.5s)
+            self.after(0, self.train_overlay.update_state, "Step 1: Standardizing Data Matrix...", 15)
+            self.safe_log("\n[PRC] Standardizing feature space...")
+            time.sleep(1.5)
             
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(self.X_cache)
             
+            # 2. SVM Optimization (Fake delay: 2.5s)
+            gamma = self.gamma_var.get()
+            nu = self.nu_var.get()
+            self.after(0, self.train_overlay.update_state, "Step 2: Optimizing SVM Hyperplanes...", 50)
+            self.safe_log("[PRC] Optimizing non-linear hyperplanes (RBF)...")
+            time.sleep(2.5)
+            
             ocsvm = OneClassSVM(kernel='rbf', gamma=gamma, nu=nu)
             ocsvm.fit(X_scaled)
+            
+            # 3. Support Vectors Extraction (Fake delay: 1.5s)
+            self.after(0, self.train_overlay.update_state, "Step 3: Extracting Support Vectors...", 85)
+            self.safe_log("[CHK] Extracting support vectors...")
+            time.sleep(1.5)
             
             self.scaler_cache = scaler
             self.ocsvm_cache = ocsvm
             
+            # 4. Finish (0.5s)
+            self.after(0, self.train_overlay.update_state, "✅ Training Complete!", 100)
             self.safe_log(f"[CHK] Boundary fit complete (Gamma: {gamma}, Nu: {nu}). SVs: {len(ocsvm.support_)}")
-            self.safe_log("[CHK] Redrawing charts...")
+            time.sleep(0.5)
             
-            self._draw_charts(X_scaled)
-            self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+            self.after(0, self._finalize_train, X_scaled)
         except Exception as e:
+            self.after(0, self.train_overlay.close)
             self.safe_log(f"[ERR] Failed during OCSVM training: {str(e)}", is_error=True)
-            messagebox.showerror("Training Error", f"An error occurred during training:\n{str(e)}")
+            self.after(0, lambda: messagebox.showerror("Training Error", f"An error occurred during training:\n{str(e)}"))
             with open("trainer_history.log", 'a', encoding='utf-8') as logf:
                 logf.write(traceback.format_exc() + "\n")
-        finally:
             self.is_processing = False
+            self.after(0, lambda: self.btn_train.config(state=tk.NORMAL, text="🧠 FIT OCSVM BOUNDARY", bg=ACCENT))
+
+    def _finalize_train(self, X_scaled):
+        try: self.train_overlay.close()
+        except: pass
+        self.btn_train.config(state=tk.NORMAL, text="🧠 FIT OCSVM BOUNDARY", bg=ACCENT)
+        self._draw_charts(X_scaled)
+        self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+        self.is_processing = False
 
     def _draw_charts(self, X_scaled):
         """Renders the 3 parallel charts."""
