@@ -16,7 +16,7 @@ import onnxruntime as ort
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 # Constants
 TARGET_AUDIO_LEN = 160000
@@ -204,7 +204,7 @@ class SmartWaveTrainer(tk.Tk):
     """Main Application GUI for SmartWave OCSVM Trainer"""
     def __init__(self):
         super().__init__()
-        self.title('SmartWave OCSVM Trainer (Pro)')
+        self.title('SmartWave OCSVM Trainer (Pro) - Double Click Charts to Expand')
         self.geometry('1380x880')
         self.configure(bg=BG_COLOR)
         
@@ -214,6 +214,7 @@ class SmartWaveTrainer(tk.Tk):
         self.X_abnormal_cache = None
         self.last_audio_cache = None
         self.last_abnormal_audio_cache = None
+        self.last_X_scaled_cache = None
         self.scaler_cache = None
         self.ocsvm_cache = None
         
@@ -279,7 +280,6 @@ class SmartWaveTrainer(tk.Tk):
         self.btn_train = tk.Button(zone3, text="🧠 FIT OCSVM BOUNDARY", bg=DISABLED_BG, fg=DISABLED_FG, font=("Segoe UI", 10, "bold"), width=22, state=tk.DISABLED, cursor="hand2", command=self.action_train_ocsvm)
         self.btn_train.pack(pady=5)
         
-        # NEW EVALUATE BUTTON
         self.btn_evaluate = tk.Button(zone3, text="🚨 EVALUATE ABNORMAL", bg=DISABLED_BG, fg=DISABLED_FG, font=("Segoe UI", 10, "bold"), width=22, state=tk.DISABLED, cursor="hand2", command=lambda: self.start_load_thread('abnormal'))
         self.btn_evaluate.pack(pady=5)
         
@@ -294,6 +294,8 @@ class SmartWaveTrainer(tk.Tk):
         chart_frame = tk.Frame(main_frame, bg=CARD_BG, highlightbackground="#DDDDDD", highlightthickness=1)
         chart_frame.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
         
+        tk.Label(chart_frame, text="💡 TIP: 더블클릭하면 줌(Zoom) 기능이 포함된 큰 팝업으로 차트를 볼 수 있습니다.", bg=CARD_BG, fg=MUTED, font=("Segoe UI", 9, "italic")).pack(pady=(5,0))
+        
         self.fig, (self.ax_wave, self.ax_fingerprint, self.ax_pca) = plt.subplots(1, 3, figsize=(15, 4))
         self.fig.patch.set_facecolor(CARD_BG)
         self.ax_wave.set_title('Raw Audio Waveform', fontsize=10, fontweight='bold', color=PRIMARY)
@@ -302,22 +304,109 @@ class SmartWaveTrainer(tk.Tk):
         
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Bind double click for interactive chart popup
+        self.canvas.mpl_connect('button_press_event', self._on_canvas_click)
         
         if self.engine:
             self.safe_log("[SYS] System Initialized. Awaiting feature extraction.")
 
+    def _on_canvas_click(self, event):
+        """Detects double clicks on specific axes to pop up an interactive chart."""
+        if event.dblclick:
+            if event.inaxes == self.ax_wave:
+                self._open_chart_popup('wave')
+            elif event.inaxes == self.ax_fingerprint:
+                self._open_chart_popup('fingerprint')
+            elif event.inaxes == self.ax_pca:
+                self._open_chart_popup('pca')
+
+    def _open_chart_popup(self, chart_type):
+        """Opens a new Toplevel window with a single interactive matplotlib chart."""
+        popup = tk.Toplevel(self)
+        popup.title(f"Interactive Chart: {chart_type.upper()}")
+        popup.geometry("900x650")
+        popup.configure(bg=CARD_BG)
+        
+        fig, ax = plt.subplots(1, 1, figsize=(9, 6))
+        fig.patch.set_facecolor(CARD_BG)
+        
+        # Draw the requested chart
+        if chart_type == 'wave':
+            if self.last_audio_cache is not None:
+                plot_len = min(len(self.last_audio_cache), SAMPLE_RATE)
+                ax.plot(self.last_audio_cache[:plot_len], color=MUTED, alpha=0.8, linewidth=1.0, label="Normal Wave")
+                if self.last_abnormal_audio_cache is not None:
+                    ab_plot_len = min(len(self.last_abnormal_audio_cache), SAMPLE_RATE)
+                    ax.plot(self.last_abnormal_audio_cache[:ab_plot_len], color=DANGER, alpha=0.6, linewidth=1.0, label="Abnormal Wave")
+                ax.set_title('Raw Audio Waveform (Interactive)', fontsize=14, fontweight='bold', color=PRIMARY)
+                ax.set_xlabel('Time (Samples)', fontsize=11)
+                ax.set_ylabel('Amplitude', fontsize=11)
+                ax.legend(loc='upper right')
+                ax.grid(True, linestyle='--', alpha=0.3)
+                
+        elif chart_type == 'fingerprint':
+            if self.X_cache is not None and len(self.X_cache) > 0:
+                X_mean = np.mean(self.X_cache, axis=0)
+                X_std = np.std(self.X_cache, axis=0)
+                bands = np.arange(len(X_mean))
+                ax.fill_between(bands, X_mean - X_std, X_mean + X_std, color=MUTED, alpha=0.25, label='Normal Variance')
+                ax.plot(bands, X_mean, color=ACCENT, linewidth=2, label='Normal Baseline')
+                if self.X_abnormal_cache is not None and len(self.X_abnormal_cache) > 0:
+                    Ab_mean = np.mean(self.X_abnormal_cache, axis=0)
+                    ax.plot(bands, Ab_mean, color=DANGER, linewidth=2, linestyle='--', label='Anomaly Signature')
+                ax.set_title(f'Deep Acoustic Fingerprint ({EMBEDDING_DIM}-Dim)', fontsize=14, fontweight='bold', color=PRIMARY)
+                ax.set_xlabel('CNN10 Feature Dimensions', fontsize=11)
+                ax.set_ylabel('Normalized Energy', fontsize=11)
+                ax.legend(loc='upper right')
+                ax.grid(True, linestyle='--', alpha=0.3)
+                
+        elif chart_type == 'pca':
+            X_scaled = self.last_X_scaled_cache
+            if X_scaled is not None and X_scaled.shape[1] >= 2 and self.ocsvm_cache is not None:
+                pca = PCA(n_components=2)
+                X_pca = pca.fit_transform(X_scaled)
+                sv_pca = X_pca[self.ocsvm_cache.support_]
+                ax.scatter(X_pca[:, 0], X_pca[:, 1], c=SUCCESS, alpha=0.6, label='Normal Data')
+                ax.scatter(sv_pca[:, 0], sv_pca[:, 1], c=WARNING_COL, edgecolors='white', s=80, label='Support Vectors')
+                if self.X_abnormal_cache is not None:
+                    Ab_scaled = self.scaler_cache.transform(self.X_abnormal_cache)
+                    Ab_pca = pca.transform(Ab_scaled)
+                    ax.scatter(Ab_pca[:, 0], Ab_pca[:, 1], c='#000000', marker='x', s=80, label='Abnormal (Anomalies)')
+                
+                xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
+                                     np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
+                grid_2d = np.c_[xx.ravel(), yy.ravel()]
+                grid_527 = pca.inverse_transform(grid_2d)
+                Z = self.ocsvm_cache.decision_function(grid_527)
+                Z = Z.reshape(xx.shape)
+                
+                ax.contourf(xx, yy, Z, levels=[Z.min(), 0, Z.max()], colors=[DANGER, SUCCESS], alpha=0.15)
+                ax.contour(xx, yy, Z, levels=[0], linewidths=2, colors=DANGER)
+                ax.set_title('OCSVM Boundary Mapping (PCA 2D)', fontsize=14, fontweight='bold', color=PRIMARY)
+                ax.legend(loc='lower right')
+                ax.grid(True, linestyle='--', alpha=0.3)
+        
+        fig.tight_layout()
+        
+        # Embed in Tkinter
+        canvas = FigureCanvasTkAgg(fig, master=popup)
+        canvas.draw()
+        
+        # Attach Toolbar
+        toolbar = NavigationToolbar2Tk(canvas, popup)
+        toolbar.update()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
     def _create_label(self, parent, text, row, col):
-        """Helper to create standard labels (DRY)."""
         tk.Label(parent, text=text, bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=row, column=col, sticky='w', pady=5)
         
     def _create_slider(self, parent, variable, from_, to_, resolution, row, col):
-        """Helper to create standard sliders (DRY)."""
         scale = tk.Scale(parent, variable=variable, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=150, bg=BG_COLOR, highlightthickness=0)
         scale.grid(row=row, column=col, padx=10)
 
     def safe_log(self, msg, is_error=False):
-        """Thread-safe logging to UI and local file."""
         self.after(0, self._append_log, msg, is_error)
 
     def _append_log(self, msg, is_error=False):
@@ -335,14 +424,12 @@ class SmartWaveTrainer(tk.Tk):
             pass
 
     def _cancel_process(self):
-        """Handles user cancellation during extraction."""
         self.is_cancelled = True
         self.overlay.btn_cancel.config(state=tk.DISABLED, text="STOPPING...")
         self.overlay.append_mini_log("! > SIGNAL: SIGINT received. Halting extraction...")
         self.safe_log("[WRN] Stop signal received. Halting process...")
 
     def start_load_thread(self, target_type='normal'):
-        """Initiates the dataset loading and embedding thread for normal or abnormal data."""
         if self.is_processing:
             return
             
@@ -372,7 +459,6 @@ class SmartWaveTrainer(tk.Tk):
         thread.start()
 
     def _load_task(self, target_dir, target_type):
-        """Background thread logic for loading and embedding WAV files."""
         def read_wav(p):
             with wave.open(p, 'rb') as w:
                 return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
@@ -405,8 +491,6 @@ class SmartWaveTrainer(tk.Tk):
                 X.append(emb)
             except Exception as e:
                 self.safe_log(f"[ERR] Failed reading {f}: {str(e)}", is_error=True)
-                with open("trainer_history.log", 'a', encoding='utf-8') as logf:
-                    logf.write(traceback.format_exc() + "\n")
                 continue 
             
             if i % 3 == 0 or i == total_files - 1:
@@ -424,8 +508,7 @@ class SmartWaveTrainer(tk.Tk):
                 self.after(0, self.overlay.update_telemetry, i, total_files, rate, eta_sec)
 
         if len(X) == 0:
-            self.safe_log("[ERR] Failed to extract features from any files.", is_error=True)
-            self.after(0, lambda: messagebox.showerror("Extraction Failed", "Could not extract features. Check file format."))
+            self.safe_log("[ERR] Failed to extract features.", is_error=True)
             self.after(0, self._reset_load_ui, target_type)
             return
 
@@ -443,7 +526,6 @@ class SmartWaveTrainer(tk.Tk):
         self.after(0, self._finalize_load, target_type)
 
     def _reset_load_ui(self, target_type='normal'):
-        """Resets the UI state if loading is cancelled or fails."""
         try: self.overlay.close()
         except: pass
         if target_type == 'normal':
@@ -455,7 +537,6 @@ class SmartWaveTrainer(tk.Tk):
         self.is_processing = False
 
     def _finalize_load(self, target_type):
-        """Completes the loading process and unlocks the next buttons."""
         try: self.overlay.close()
         except: pass
         self.is_processing = False
@@ -473,13 +554,11 @@ class SmartWaveTrainer(tk.Tk):
                 self._draw_charts(self.scaler_cache.transform(self.X_cache))
         
     def action_train_ocsvm(self):
-        """Fits OCSVM with a deliberate 'Labor Illusion' delay for UX purposes."""
         if self.is_processing or self.X_cache is None: return
         self.is_processing = True
         
         if len(self.X_cache) < 2:
-            self.safe_log("[ERR] Not enough data points to train OCSVM.", is_error=True)
-            messagebox.showerror("Data Error", "At least 2 normal samples are required to train the model.")
+            self.safe_log("[ERR] Not enough data points.", is_error=True)
             self.is_processing = False
             return
             
@@ -491,7 +570,6 @@ class SmartWaveTrainer(tk.Tk):
 
     def _train_task_fake_delay(self):
         try:
-            # 1. Standardizing (Fake delay: 1.5s)
             self.after(0, self.train_overlay.update_state, "Step 1: Standardizing Data Matrix...", 15)
             self.safe_log("\n[PRC] Standardizing feature space...")
             time.sleep(1.5)
@@ -499,7 +577,6 @@ class SmartWaveTrainer(tk.Tk):
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(self.X_cache)
             
-            # 2. SVM Optimization (Fake delay: 2.5s)
             gamma = self.gamma_var.get()
             nu = self.nu_var.get()
             self.after(0, self.train_overlay.update_state, "Step 2: Optimizing SVM Hyperplanes...", 50)
@@ -509,7 +586,6 @@ class SmartWaveTrainer(tk.Tk):
             ocsvm = OneClassSVM(kernel='rbf', gamma=gamma, nu=nu)
             ocsvm.fit(X_scaled)
             
-            # 3. Support Vectors Extraction (Fake delay: 1.5s)
             self.after(0, self.train_overlay.update_state, "Step 3: Extracting Support Vectors...", 85)
             self.safe_log("[CHK] Extracting support vectors...")
             time.sleep(1.5)
@@ -517,7 +593,6 @@ class SmartWaveTrainer(tk.Tk):
             self.scaler_cache = scaler
             self.ocsvm_cache = ocsvm
             
-            # 4. Finish (0.5s)
             self.after(0, self.train_overlay.update_state, "✅ Training Complete!", 100)
             self.safe_log(f"[CHK] Boundary fit complete (Gamma: {gamma}, Nu: {nu}). SVs: {len(ocsvm.support_)}")
             time.sleep(0.5)
@@ -525,10 +600,6 @@ class SmartWaveTrainer(tk.Tk):
             self.after(0, self._finalize_train, X_scaled)
         except Exception as e:
             self.after(0, self.train_overlay.close)
-            self.safe_log(f"[ERR] Failed during OCSVM training: {str(e)}", is_error=True)
-            self.after(0, lambda: messagebox.showerror("Training Error", f"An error occurred during training:\n{str(e)}"))
-            with open("trainer_history.log", 'a', encoding='utf-8') as logf:
-                logf.write(traceback.format_exc() + "\n")
             self.is_processing = False
             self.after(0, lambda: self.btn_train.config(state=tk.NORMAL, text="🧠 FIT OCSVM BOUNDARY", bg=ACCENT))
 
@@ -541,69 +612,61 @@ class SmartWaveTrainer(tk.Tk):
         self._draw_charts(X_scaled)
         self.is_processing = False
 
-    def _draw_charts(self, X_scaled):
-        """Renders the 3 parallel charts, overlaying abnormal data if it exists."""
-        # 1. Wave Chart
+    def _draw_charts(self, X_scaled=None):
+        """Renders the 3 parallel charts and saves scaling for interactive popup."""
+        if X_scaled is not None:
+            self.last_X_scaled_cache = X_scaled
+        else:
+            X_scaled = self.last_X_scaled_cache
+            
         self.ax_wave.clear()
         if self.last_audio_cache is not None:
             plot_len = min(len(self.last_audio_cache), SAMPLE_RATE)
             self.ax_wave.plot(self.last_audio_cache[:plot_len], color=MUTED, alpha=0.8, linewidth=0.8, label="Normal Wave")
-            
             if self.last_abnormal_audio_cache is not None:
                 ab_plot_len = min(len(self.last_abnormal_audio_cache), SAMPLE_RATE)
                 self.ax_wave.plot(self.last_abnormal_audio_cache[:ab_plot_len], color=DANGER, alpha=0.6, linewidth=0.8, label="Abnormal Wave")
-                
             self.ax_wave.set_title('Raw Audio Waveform (1 sec)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_wave.set_xlabel('Time (Samples)', fontsize=9)
             self.ax_wave.set_ylabel('Amplitude', fontsize=9)
             self.ax_wave.legend(loc='upper right', fontsize=8)
             self.ax_wave.grid(True, linestyle='--', alpha=0.3)
             
-        # 2. Fingerprint Chart
         self.ax_fingerprint.clear()
         if self.X_cache is not None and len(self.X_cache) > 0:
             X_mean = np.mean(self.X_cache, axis=0)
             X_std = np.std(self.X_cache, axis=0)
             bands = np.arange(len(X_mean))
-            
             self.ax_fingerprint.fill_between(bands, X_mean - X_std, X_mean + X_std, color=MUTED, alpha=0.25, label='Normal Variance')
             self.ax_fingerprint.plot(bands, X_mean, color=ACCENT, linewidth=2, label='Normal Baseline')
-            
             if self.X_abnormal_cache is not None and len(self.X_abnormal_cache) > 0:
                 Ab_mean = np.mean(self.X_abnormal_cache, axis=0)
                 self.ax_fingerprint.plot(bands, Ab_mean, color=DANGER, linewidth=2, linestyle='--', label='Anomaly Signature')
-                
             self.ax_fingerprint.set_title(f'Deep Acoustic Fingerprint ({EMBEDDING_DIM}-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_fingerprint.set_xlabel('CNN10 Feature Dimensions', fontsize=9)
             self.ax_fingerprint.set_ylabel('Normalized Energy', fontsize=9)
             self.ax_fingerprint.legend(loc='upper right', fontsize=8)
             self.ax_fingerprint.grid(True, linestyle='--', alpha=0.3)
             
-        # 3. PCA Chart
         self.ax_pca.clear()
         if X_scaled is not None and X_scaled.shape[1] >= 2 and self.ocsvm_cache is not None:
             pca = PCA(n_components=2)
             X_pca = pca.fit_transform(X_scaled)
             sv_pca = X_pca[self.ocsvm_cache.support_]
-            
             self.ax_pca.scatter(X_pca[:, 0], X_pca[:, 1], c=SUCCESS, alpha=0.6, label='Normal Data')
             self.ax_pca.scatter(sv_pca[:, 0], sv_pca[:, 1], c=WARNING_COL, edgecolors='white', s=60, label='Support Vectors')
-            
             if self.X_abnormal_cache is not None:
                 Ab_scaled = self.scaler_cache.transform(self.X_abnormal_cache)
                 Ab_pca = pca.transform(Ab_scaled)
                 self.ax_pca.scatter(Ab_pca[:, 0], Ab_pca[:, 1], c='#000000', marker='x', s=60, label='Abnormal (Anomalies)')
-            
             xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
                                  np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
             grid_2d = np.c_[xx.ravel(), yy.ravel()]
             grid_527 = pca.inverse_transform(grid_2d)
             Z = self.ocsvm_cache.decision_function(grid_527)
             Z = Z.reshape(xx.shape)
-            
             self.ax_pca.contourf(xx, yy, Z, levels=[Z.min(), 0, Z.max()], colors=[DANGER, SUCCESS], alpha=0.15)
             self.ax_pca.contour(xx, yy, Z, levels=[0], linewidths=2, colors=DANGER)
-            
             self.ax_pca.set_title('OCSVM Boundary Mapping (PCA 2D)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_pca.legend(loc='lower right', fontsize=8)
             self.ax_pca.grid(True, linestyle='--', alpha=0.3)
@@ -612,15 +675,12 @@ class SmartWaveTrainer(tk.Tk):
         self.canvas.draw()
 
     def action_export_model(self):
-        """Exports the trained model configuration to JSON."""
         if self.is_processing or self.ocsvm_cache is None or self.scaler_cache is None: return
         self.is_processing = True
-        
         try:
             rho = float(-self.ocsvm_cache.offset_[0])
             svs = self.scaler_cache.transform(self.X_cache)[self.ocsvm_cache.support_]
             dual_coef = self.ocsvm_cache.dual_coef_[0]
-            
             out = {
                 "equipment_name": self.equip_var.get(),
                 "equipment_key": self.equip_var.get(),
@@ -637,19 +697,13 @@ class SmartWaveTrainer(tk.Tk):
                 "support_vectors": svs.tolist(),
                 "dual_coef": dual_coef.tolist(),
             }
-            
             out_path = f"ocsvm_params_{self.equip_var.get()}.json"
             with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(out, f, indent=2)
-                
             self.safe_log(f"\n[OUT] 🚀 Model parameters securely exported to: {out_path}")
-            self.safe_log(f"[OUT] Total Support Vectors preserved: {len(svs)}")
             messagebox.showinfo("Export Successful", f"Model parameters saved to:\n{out_path}")
         except Exception as e:
             self.safe_log(f"[ERR] Failed to export model: {str(e)}", is_error=True)
-            messagebox.showerror("Export Error", f"An error occurred while saving the model:\n{str(e)}")
-            with open("trainer_history.log", 'a', encoding='utf-8') as logf:
-                logf.write(traceback.format_exc() + "\n")
         finally:
             self.is_processing = False
 
