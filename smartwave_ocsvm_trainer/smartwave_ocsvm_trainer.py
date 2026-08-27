@@ -398,6 +398,9 @@ class SmartWaveTrainer(tk.Tk):
         toolbar = NavigationToolbar2Tk(canvas, popup)
         toolbar.update()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Prevent memory leak: close the matplotlib Figure when popup is closed
+        popup.protocol("WM_DELETE_WINDOW", lambda: (plt.close(fig), popup.destroy()))
 
     def _create_label(self, parent, text, row, col):
         tk.Label(parent, text=text, bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=row, column=col, sticky='w', pady=5)
@@ -599,6 +602,7 @@ class SmartWaveTrainer(tk.Tk):
             
             self.after(0, self._finalize_train, X_scaled)
         except Exception as e:
+            self.safe_log(f"[ERR] Training failed: {str(e)}", is_error=True)
             self.after(0, self.train_overlay.close)
             self.is_processing = False
             self.after(0, lambda: self.btn_train.config(state=tk.NORMAL, text="🧠 FIT OCSVM BOUNDARY", bg=ACCENT))
