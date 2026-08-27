@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartWave OCSVM Trainer (Web)</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>SmartWave OCSVM Trainer</h1>
+            <p>Samsung Reference Design System</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel: Controls -->
+            <aside class="control-panel">
+                <!-- Zone 1: Data Setup -->
+                <div class="panel-section">
+                    <h2>1. Data Setup</h2>
+                    <div class="form-group">
+                        <label>Equipment:</label>
+                        <select id="equipment" class="input-element">
+                            <option value="Motor">Motor</option>
+                            <option value="Pump">Pump</option>
+                            <option value="Fan">Fan</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Dataset Path:</label>
+                        <input type="text" id="target-dir" class="input-element" value="C:\Users\user\Desktop\SmartWave\dataset\normal" placeholder="e.g. C:\dataset\normal">
+                    </div>
+                    <button id="btn-load" class="cta-button">📂 EXTRACT FEATURES</button>
+                </div>
+
+                <!-- Zone 2: Hyperparameters -->
+                <div class="panel-section">
+                    <h2>2. Hyperparameters</h2>
+                    <div class="form-group">
+                        <label>Gamma (RBF): <span id="gamma-val">0.001</span></label>
+                        <input type="range" id="gamma" min="0.0001" max="1.0" step="0.0001" value="0.001">
+                    </div>
+                    <div class="form-group">
+                        <label>Nu (Margin): <span id="nu-val">0.10</span></label>
+                        <input type="range" id="nu" min="0.01" max="0.5" step="0.01" value="0.10">
+                    </div>
+                </div>
+
+                <!-- Zone 3: Execution -->
+                <div class="panel-section">
+                    <h2>3. Execution</h2>
+                    <button id="btn-train" class="cta-button" disabled>🧠 FIT OCSVM BOUNDARY</button>
+                    <button id="btn-eval" class="cta-button" disabled>🚨 EVALUATE ABNORMAL</button>
+                </div>
+                
+                <!-- Status Logs -->
+                <div class="panel-section status-section">
+                    <h2>System Status</h2>
+                    <div id="log-console" class="log-console">
+                        > System Initialized. Awaiting feature extraction.
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Right Panel: Charts -->
+            <section class="chart-panel">
+                <div class="chart-card">
+                    <h3 class="tab__item-title">Raw Audio Waveform (1 sec)</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="chart-wave"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-card">
+                    <h3 class="tab__item-title">Deep Acoustic Fingerprint (527-Dim)</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="chart-fp"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-card">
+                    <h3 class="tab__item-title">OCSVM Boundary Mapping (PCA 2D)</h3>
+                    <div class="canvas-wrapper">
+                        <canvas id="chart-pca"></canvas>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <!-- Loading Overlay (Labor Illusion) -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="loading-modal">
+                <h2 id="loading-title">PROCESSING...</h2>
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <p id="loading-text">Initializing...</p>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
