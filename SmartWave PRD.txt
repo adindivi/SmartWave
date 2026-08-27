@@ -1,3 +1,4 @@
+
 확정된 사용 모델 : 
 PANNs-industrial CNN 모바일 버전 모델
 미니 트랜스포머: 파이토치(PyTorch) 기본 기능인 nn.TransformerEncoderLayer
@@ -6,6 +7,9 @@ OCSVM
 
 정상 소리데이터 : MIMII Dataset 
 
+
+PANNs 모델을 설계한 연구진(ByteDance & 영국 서리 대학)
+STFT 하드코딩 가중치 계산 
 
 🎯 전체 흐름
 

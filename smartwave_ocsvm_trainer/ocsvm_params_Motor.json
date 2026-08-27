@@ -1,10 +1,9 @@
 {
   "equipment_name": "Motor",
   "equipment_key": "Motor",
-  "exported_at": "2026-08-27T15:09:44.501003",
+  "exported_at": "2026-08-27T15:56:24.720981",
   "sample_rate": 16000,
   "embedding_dim": 527,
-  "embedding_mode": "cnn10_e2e",
   "preprocessing": "StandardScaler",
   "scaler_mean": [
     -0.021363898122993608,
