@@ -3,7 +3,7 @@ __pycache__/
 .env
 venv/
 env/
-dataset/
+dataset/**/*.wav
 models_official/*.tflite
 models_official/*.safetensors
 models_official/*.onnx
