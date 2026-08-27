@@ -4,9 +4,10 @@ import time
 import datetime
 import wave
 import threading
+import traceback
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 from sklearn.svm import OneClassSVM
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -16,6 +17,11 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+# Constants
+TARGET_AUDIO_LEN = 160000
+SAMPLE_RATE = 16000
+EMBEDDING_DIM = 527
 
 # UI Colors (Samsung One UI Inspired / Pro Industrial)
 PRIMARY = "#000000"
@@ -35,31 +41,26 @@ plt.rcParams['font.family'] = ['Malgun Gothic', 'Segoe UI', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 
 class PANNsEngine:
+    """Extracts 527-dimensional acoustic embeddings using PANNs CNN10 ONNX model."""
     def __init__(self):
-        self.mode = 'mel_stats'
-        self.dim = 128
+        self.mode = 'cnn10_e2e'
+        self.dim = EMBEDDING_DIM
         self.sess = None
         
         onnx_path = '../models_official/smartwave_cnn10_e2e.onnx'
-        if os.path.exists(onnx_path):
-            try:
-                self.sess = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
-                self.mode = 'cnn10_e2e'
-                self.dim = 527
-            except Exception as e:
-                pass
+        if not os.path.exists(onnx_path):
+            raise FileNotFoundError(f"ONNX model not found at: {onnx_path}")
+            
+        self.sess = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
     
     def extract_clip_embedding(self, audio):
-        if self.mode == 'cnn10_e2e':
-            if len(audio) < 160000:
-                audio = np.pad(audio, (0, 160000 - len(audio)))
-            else:
-                audio = audio[:160000]
-            audio = audio.astype(np.float32)[np.newaxis, :]
-            emb = self.sess.run(None, {'audio': audio})[0][0]
-            return emb
+        """Extracts embeddings from raw audio. Pads or truncates to TARGET_AUDIO_LEN."""
+        if len(audio) < TARGET_AUDIO_LEN:
+            audio = np.pad(audio, (0, TARGET_AUDIO_LEN - len(audio)))
         else:
-            return np.random.randn(128).astype(np.float32)
+            audio = audio[:TARGET_AUDIO_LEN]
+        audio = audio.astype(np.float32)[np.newaxis, :]
+        return self.sess.run(None, {'audio': audio})[0][0]
 
 class LoadingOverlay:
     """Modern Modal Overlay for Loading Dataset"""
@@ -167,6 +168,7 @@ class LoadingOverlay:
         self.popup.destroy()
 
 class SmartWaveTrainer(tk.Tk):
+    """Main Application GUI for SmartWave OCSVM Trainer"""
     def __init__(self):
         super().__init__()
         self.title('SmartWave OCSVM Trainer (Pro)')
@@ -174,15 +176,30 @@ class SmartWaveTrainer(tk.Tk):
         self.configure(bg=BG_COLOR)
         
         self.is_cancelled = False
+        self.is_processing = False
         self.X_cache = None
         self.last_audio_cache = None
         self.scaler_cache = None
         self.ocsvm_cache = None
         
-        self.engine = PANNsEngine()
-        header_text = f"SmartWave OCSVM Trainer - Engine: {self.engine.mode.upper()} ({self.engine.dim}-dim)"
+        # UI Initialization
+        self._init_engine()
+        self._build_ui()
+        
+    def _init_engine(self):
+        """Initializes the PANNs Engine with error handling."""
+        try:
+            self.engine = PANNsEngine()
+            header_text = f"SmartWave OCSVM Trainer - Engine: {self.engine.mode.upper()} ({self.engine.dim}-dim)"
+        except FileNotFoundError as e:
+            messagebox.showerror("Engine Load Error", str(e) + "\n\nPlease ensure the ONNX model exists before running the trainer.")
+            self.engine = None
+            header_text = "SmartWave OCSVM Trainer - [ENGINE MISSING]"
+            
         tk.Label(self, text=header_text, bg=PRIMARY, fg="white", font=("Segoe UI", 16, "bold"), pady=12).pack(fill=tk.X)
         
+    def _build_ui(self):
+        """Builds the main user interface."""
         main_frame = tk.Frame(self, bg=BG_COLOR)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
@@ -198,24 +215,27 @@ class SmartWaveTrainer(tk.Tk):
         zone1 = tk.LabelFrame(ctrl_frame, text="1. Data Setup", bg=BG_COLOR, font=("Segoe UI", 10, "bold"), padx=15, pady=10)
         zone1.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(zone1, text="Equipment:", bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=0, column=0, sticky='w', pady=5)
+        self._create_label(zone1, "Equipment:", 0, 0)
         self.equip_var = tk.StringVar(value="Motor")
         ttk.Combobox(zone1, textvariable=self.equip_var, values=["Motor", "Conveyor", "Pump", "Fan", "RoboticArm"], font=("Segoe UI", 9), width=15).grid(row=0, column=1, sticky='w', pady=5, padx=10)
         
         self.btn_load = tk.Button(zone1, text="📂 EXTRACT FEATURES", bg=LOAD_BG, fg="white", font=("Segoe UI", 10, "bold"), width=22, cursor="hand2", command=self.start_load_thread)
         self.btn_load.grid(row=1, column=0, columnspan=2, pady=5)
         
+        if self.engine is None:
+            self.btn_load.config(state=tk.DISABLED)
+        
         # Zone 2: Hyperparameters
         zone2 = tk.LabelFrame(ctrl_frame, text="2. Hyperparameters", bg=BG_COLOR, font=("Segoe UI", 10, "bold"), padx=15, pady=10)
         zone2.pack(fill=tk.X, pady=(0, 10))
         
-        tk.Label(zone2, text="Gamma (RBF):", bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=0, column=0, sticky='w', pady=5)
+        self._create_label(zone2, "Gamma (RBF):", 0, 0)
         self.gamma_var = tk.DoubleVar(value=0.001)
-        tk.Scale(zone2, variable=self.gamma_var, from_=0.0001, to=1.0, resolution=0.0001, orient=tk.HORIZONTAL, length=150, bg=BG_COLOR, highlightthickness=0).grid(row=0, column=1, padx=10)
+        self._create_slider(zone2, self.gamma_var, 0.0001, 1.0, 0.0001, 0, 1)
         
-        tk.Label(zone2, text="Nu (Margin):", bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=1, column=0, sticky='w', pady=5)
+        self._create_label(zone2, "Nu (Margin):", 1, 0)
         self.nu_var = tk.DoubleVar(value=0.10)
-        tk.Scale(zone2, variable=self.nu_var, from_=0.01, to=0.5, resolution=0.01, orient=tk.HORIZONTAL, length=150, bg=BG_COLOR, highlightthickness=0).grid(row=1, column=1, padx=10)
+        self._create_slider(zone2, self.nu_var, 0.01, 0.5, 0.01, 1, 1)
         
         # Zone 3: Execution
         zone3 = tk.LabelFrame(ctrl_frame, text="3. Execution", bg=BG_COLOR, font=("Segoe UI", 10, "bold"), padx=15, pady=10)
@@ -238,19 +258,34 @@ class SmartWaveTrainer(tk.Tk):
         self.fig, (self.ax_wave, self.ax_fingerprint, self.ax_pca) = plt.subplots(1, 3, figsize=(15, 4))
         self.fig.patch.set_facecolor(CARD_BG)
         self.ax_wave.set_title('Raw Audio Waveform', fontsize=10, fontweight='bold', color=PRIMARY)
-        self.ax_fingerprint.set_title('Acoustic Fingerprint (527-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
+        self.ax_fingerprint.set_title(f'Acoustic Fingerprint ({EMBEDDING_DIM}-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
         self.ax_pca.set_title('OCSVM Space (PCA 2D)', fontsize=10, fontweight='bold', color=PRIMARY)
         
         self.canvas = FigureCanvasTkAgg(self.fig, master=chart_frame)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        self.safe_log("[SYS] System Initialized. Awaiting feature extraction.")
+        if self.engine:
+            self.safe_log("[SYS] System Initialized. Awaiting feature extraction.")
 
-    def safe_log(self, msg):
-        self.after(0, self._append_log, msg)
+    def _create_label(self, parent, text, row, col):
+        """Helper to create standard labels (DRY)."""
+        tk.Label(parent, text=text, bg=BG_COLOR, font=("Segoe UI", 9)).grid(row=row, column=col, sticky='w', pady=5)
+        
+    def _create_slider(self, parent, variable, from_, to_, resolution, row, col):
+        """Helper to create standard sliders (DRY)."""
+        scale = tk.Scale(parent, variable=variable, from_=from_, to=to_, resolution=resolution, orient=tk.HORIZONTAL, length=150, bg=BG_COLOR, highlightthickness=0)
+        scale.grid(row=row, column=col, padx=10)
 
-    def _append_log(self, msg):
+    def safe_log(self, msg, is_error=False):
+        """Thread-safe logging to UI and local file."""
+        self.after(0, self._append_log, msg, is_error)
+
+    def _append_log(self, msg, is_error=False):
+        # Add visual distinction for errors
+        if is_error:
+            msg = f"❌ {msg}"
+            
         self.log_text.insert(tk.END, msg + "\n")
         self.log_text.see(tk.END)
         log_file = "trainer_history.log"
@@ -262,21 +297,29 @@ class SmartWaveTrainer(tk.Tk):
             pass
 
     def _cancel_process(self):
+        """Handles user cancellation during extraction."""
         self.is_cancelled = True
         self.overlay.btn_cancel.config(state=tk.DISABLED, text="STOPPING...")
         self.overlay.append_mini_log("! > SIGNAL: SIGINT received. Halting extraction...")
         self.safe_log("[WRN] Stop signal received. Halting process...")
 
     def start_load_thread(self):
+        """Initiates the dataset loading and embedding thread."""
+        if self.is_processing:
+            return
+            
         dataset_dir = filedialog.askdirectory(title="Select Dataset Folder")
         if not dataset_dir: return
         
         normal_dir = os.path.join(dataset_dir, 'normal')
         if not os.path.exists(normal_dir):
-            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing in {dataset_dir}.")
+            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing in {dataset_dir}.", is_error=True)
+            messagebox.showerror("Folder Error", f"Cannot find 'normal' folder inside:\n{dataset_dir}")
             return
             
+        self.is_processing = True
         self.is_cancelled = False
+        
         self.btn_load.config(state=tk.DISABLED, text="PROCESSING...", bg=MUTED)
         self.btn_train.config(state=tk.DISABLED, bg=DISABLED_BG, fg=DISABLED_FG)
         self.btn_export.config(state=tk.DISABLED, bg=DISABLED_BG, fg=DISABLED_FG)
@@ -287,6 +330,7 @@ class SmartWaveTrainer(tk.Tk):
         thread.start()
 
     def _load_task(self, normal_dir):
+        """Background thread logic for loading and embedding WAV files."""
         def read_wav(p):
             with wave.open(p, 'rb') as w:
                 return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
@@ -300,6 +344,8 @@ class SmartWaveTrainer(tk.Tk):
         last_audio = None
         
         if total_files == 0:
+            self.safe_log("[ERR] No .wav files found in directory.", is_error=True)
+            self.after(0, lambda: messagebox.showwarning("Empty Folder", "No .wav files were found in the selected folder."))
             self.after(0, self._reset_load_ui)
             return
 
@@ -310,15 +356,22 @@ class SmartWaveTrainer(tk.Tk):
                 self.after(0, self._reset_load_ui)
                 return
                 
-            audio = read_wav(os.path.join(normal_dir, f))
-            if i == total_files - 1: last_audio = audio
-            emb = self.engine.extract_clip_embedding(audio)
-            X.append(emb)
+            try:
+                audio = read_wav(os.path.join(normal_dir, f))
+                if i == total_files - 1: last_audio = audio
+                emb = self.engine.extract_clip_embedding(audio)
+                X.append(emb)
+            except Exception as e:
+                self.safe_log(f"[ERR] Failed reading {f}: {str(e)}", is_error=True)
+                # Log traceback to file but don't show full traceback in UI log
+                with open("trainer_history.log", 'a', encoding='utf-8') as logf:
+                    logf.write(traceback.format_exc() + "\n")
+                continue # Safely skip corrupted files
             
             if i % 3 == 0 or i == total_files - 1:
                 short_f = (f[:12] + '..') if len(f) > 14 else f.ljust(14)
                 snap = f"{emb[0]:.3f}, {emb[1]:.3f}, {emb[2]:.3f}"
-                self.after(0, self.overlay.append_mini_log, f"> {short_f} ➔ [ {snap} ... 527-Dim ] ➔ OK")
+                self.after(0, self.overlay.append_mini_log, f"> {short_f} ➔ [ {snap} ... {EMBEDDING_DIM}-Dim ] ➔ OK")
             
             if i % 5 == 0 or i == total_files - 1:
                 progress = (i / total_files) * 100 
@@ -328,6 +381,12 @@ class SmartWaveTrainer(tk.Tk):
                 
                 self.after(0, self.overlay.update_state, f"[PRC] Processing Batch {i}/{total_files}...", progress)
                 self.after(0, self.overlay.update_telemetry, i, total_files, rate, eta_sec)
+
+        if len(X) == 0:
+            self.safe_log("[ERR] Failed to extract features from any files.", is_error=True)
+            self.after(0, lambda: messagebox.showerror("Extraction Failed", "Could not extract features. Check file format."))
+            self.after(0, self._reset_load_ui)
+            return
 
         self.X_cache = np.array(X)
         self.last_audio_cache = last_audio
@@ -339,41 +398,61 @@ class SmartWaveTrainer(tk.Tk):
         self.after(0, self._finalize_load)
 
     def _reset_load_ui(self):
+        """Resets the UI state if loading is cancelled or fails."""
         try: self.overlay.close()
         except: pass
         self.btn_load.config(state=tk.NORMAL, text="📂 EXTRACT FEATURES", bg=LOAD_BG)
+        self.is_processing = False
 
     def _finalize_load(self):
+        """Completes the loading process and unlocks the Train button."""
         self._reset_load_ui()
         self.btn_train.config(state=tk.NORMAL, bg=ACCENT, fg="white")
         self.safe_log("[SYS] Features extracted and loaded into memory. Ready to fit boundary.")
         
     def action_train_ocsvm(self):
-        if self.X_cache is None: return
+        """Fits OCSVM instantly from memory and redraws charts."""
+        if self.is_processing or self.X_cache is None: return
+        self.is_processing = True
         
-        self.safe_log(f"\n[PRC] Fitting OCSVM Boundary instantly from memory cache...")
-        gamma = self.gamma_var.get()
-        nu = self.nu_var.get()
-        
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(self.X_cache)
-        
-        ocsvm = OneClassSVM(kernel='rbf', gamma=gamma, nu=nu)
-        ocsvm.fit(X_scaled)
-        
-        self.scaler_cache = scaler
-        self.ocsvm_cache = ocsvm
-        
-        self.safe_log(f"[CHK] Boundary fit complete (Gamma: {gamma}, Nu: {nu}). SVs: {len(ocsvm.support_)}")
-        self.safe_log("[CHK] Redrawing charts...")
-        
-        self._draw_charts(X_scaled)
-        self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+        if len(self.X_cache) < 2:
+            self.safe_log("[ERR] Not enough data points to train OCSVM.", is_error=True)
+            messagebox.showerror("Data Error", "At least 2 normal samples are required to train the model.")
+            self.is_processing = False
+            return
+            
+        try:
+            self.safe_log(f"\n[PRC] Fitting OCSVM Boundary instantly from memory cache...")
+            gamma = self.gamma_var.get()
+            nu = self.nu_var.get()
+            
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(self.X_cache)
+            
+            ocsvm = OneClassSVM(kernel='rbf', gamma=gamma, nu=nu)
+            ocsvm.fit(X_scaled)
+            
+            self.scaler_cache = scaler
+            self.ocsvm_cache = ocsvm
+            
+            self.safe_log(f"[CHK] Boundary fit complete (Gamma: {gamma}, Nu: {nu}). SVs: {len(ocsvm.support_)}")
+            self.safe_log("[CHK] Redrawing charts...")
+            
+            self._draw_charts(X_scaled)
+            self.btn_export.config(state=tk.NORMAL, bg=SUCCESS, fg="white")
+        except Exception as e:
+            self.safe_log(f"[ERR] Failed during OCSVM training: {str(e)}", is_error=True)
+            messagebox.showerror("Training Error", f"An error occurred during training:\n{str(e)}")
+            with open("trainer_history.log", 'a', encoding='utf-8') as logf:
+                logf.write(traceback.format_exc() + "\n")
+        finally:
+            self.is_processing = False
 
     def _draw_charts(self, X_scaled):
+        """Renders the 3 parallel charts."""
         self.ax_wave.clear()
         if self.last_audio_cache is not None:
-            plot_len = min(len(self.last_audio_cache), 16000)
+            plot_len = min(len(self.last_audio_cache), SAMPLE_RATE)
             self.ax_wave.plot(self.last_audio_cache[:plot_len], color=MUTED, alpha=0.8, linewidth=0.8)
             self.ax_wave.set_title('Raw Audio Waveform (1 sec)', fontsize=10, fontweight='bold', color=PRIMARY)
             self.ax_wave.set_xlabel('Time (Samples)', fontsize=9)
@@ -389,8 +468,8 @@ class SmartWaveTrainer(tk.Tk):
             self.ax_fingerprint.fill_between(bands, X_mean - X_std, X_mean + X_std, color=MUTED, alpha=0.25, label='Normal Variance')
             self.ax_fingerprint.plot(bands, X_mean, color=ACCENT, linewidth=2, label='Healthy Baseline')
             
-            self.ax_fingerprint.set_title('Deep Acoustic Fingerprint (527-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
-            self.ax_fingerprint.set_xlabel('CNN10 Feature Dimensions (0-526)', fontsize=9)
+            self.ax_fingerprint.set_title(f'Deep Acoustic Fingerprint ({EMBEDDING_DIM}-Dim)', fontsize=10, fontweight='bold', color=PRIMARY)
+            self.ax_fingerprint.set_xlabel('CNN10 Feature Dimensions', fontsize=9)
             self.ax_fingerprint.set_ylabel('Normalized Energy', fontsize=9)
             self.ax_fingerprint.legend(loc='upper right', fontsize=8)
             self.ax_fingerprint.grid(True, linestyle='--', alpha=0.3)
@@ -422,35 +501,46 @@ class SmartWaveTrainer(tk.Tk):
         self.canvas.draw()
 
     def action_export_model(self):
-        if self.ocsvm_cache is None or self.scaler_cache is None: return
+        """Exports the trained model configuration to JSON."""
+        if self.is_processing or self.ocsvm_cache is None or self.scaler_cache is None: return
+        self.is_processing = True
         
-        rho = float(-self.ocsvm_cache.offset_[0])
-        svs = self.scaler_cache.transform(self.X_cache)[self.ocsvm_cache.support_]
-        dual_coef = self.ocsvm_cache.dual_coef_[0]
-        
-        out = {
-            "equipment_name": self.equip_var.get(),
-            "equipment_key": self.equip_var.get(),
-            "exported_at": datetime.datetime.now().isoformat(),
-            "sample_rate": 16000,
-            "embedding_dim": self.engine.dim,
-            "preprocessing": "StandardScaler",
-            "scaler_mean": self.scaler_cache.mean_.tolist(),
-            "scaler_scale": self.scaler_cache.scale_.tolist(),
-            "gamma": float(self.gamma_var.get()), 
-            "nu": float(self.nu_var.get()), 
-            "rho": rho,
-            "n_support_vectors": len(svs),
-            "support_vectors": svs.tolist(),
-            "dual_coef": dual_coef.tolist(),
-        }
-        
-        out_path = f"ocsvm_params_{self.equip_var.get()}.json"
-        with open(out_path, 'w', encoding='utf-8') as f:
-            json.dump(out, f, indent=2)
+        try:
+            rho = float(-self.ocsvm_cache.offset_[0])
+            svs = self.scaler_cache.transform(self.X_cache)[self.ocsvm_cache.support_]
+            dual_coef = self.ocsvm_cache.dual_coef_[0]
             
-        self.safe_log(f"\n[OUT] 🚀 Model parameters securely exported to: {out_path}")
-        self.safe_log(f"[OUT] Total Support Vectors preserved: {len(svs)}")
+            out = {
+                "equipment_name": self.equip_var.get(),
+                "equipment_key": self.equip_var.get(),
+                "exported_at": datetime.datetime.now().isoformat(),
+                "sample_rate": SAMPLE_RATE,
+                "embedding_dim": self.engine.dim,
+                "preprocessing": "StandardScaler",
+                "scaler_mean": self.scaler_cache.mean_.tolist(),
+                "scaler_scale": self.scaler_cache.scale_.tolist(),
+                "gamma": float(self.gamma_var.get()), 
+                "nu": float(self.nu_var.get()), 
+                "rho": rho,
+                "n_support_vectors": len(svs),
+                "support_vectors": svs.tolist(),
+                "dual_coef": dual_coef.tolist(),
+            }
+            
+            out_path = f"ocsvm_params_{self.equip_var.get()}.json"
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump(out, f, indent=2)
+                
+            self.safe_log(f"\n[OUT] 🚀 Model parameters securely exported to: {out_path}")
+            self.safe_log(f"[OUT] Total Support Vectors preserved: {len(svs)}")
+            messagebox.showinfo("Export Successful", f"Model parameters saved to:\n{out_path}")
+        except Exception as e:
+            self.safe_log(f"[ERR] Failed to export model: {str(e)}", is_error=True)
+            messagebox.showerror("Export Error", f"An error occurred while saving the model:\n{str(e)}")
+            with open("trainer_history.log", 'a', encoding='utf-8') as logf:
+                logf.write(traceback.format_exc() + "\n")
+        finally:
+            self.is_processing = False
 
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
