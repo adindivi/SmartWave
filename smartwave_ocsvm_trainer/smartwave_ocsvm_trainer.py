@@ -22,6 +22,7 @@ PRIMARY = "#000000"
 ACCENT = "#0381FE"
 SUCCESS = "#10B981"
 DANGER = "#F43F5E"
+WARNING_COL = "#F59E0B" # Orange for dynamic color
 BG_COLOR = "#F7F7F7"
 CARD_BG = "#FFFFFF"
 MUTED = "#707070"
@@ -58,36 +59,35 @@ class PANNsEngine:
             return np.random.randn(128).astype(np.float32)
 
 class LoadingOverlay:
-    """Modern Modal Overlay for Pro Industrial Look"""
-    def __init__(self, parent):
+    """Modern Modal Overlay with 3-Column Dynamic Telemetry Dashboard"""
+    def __init__(self, parent, cancel_callback=None):
         self.parent = parent
         
-        # 1. Dimming background overlay
-        self.dim = tk.Toplevel(parent)
-        self.dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+{parent.winfo_x()}+{parent.winfo_y()}")
-        self.dim.overrideredirect(True)
-        self.dim.attributes('-alpha', 0.7)
-        self.dim.configure(bg='black')
-        
-        # 2. Main Popup Modal
         self.popup = tk.Toplevel(parent)
         self.popup.overrideredirect(True)
+        self.popup.grab_set() 
         
-        pw, ph = 550, 320
+        pw, ph = 580, 350
         x = parent.winfo_x() + (parent.winfo_width() // 2) - (pw // 2)
         y = parent.winfo_y() + (parent.winfo_height() // 2) - (ph // 2)
         self.popup.geometry(f"{pw}x{ph}+{x}+{y}")
         self.popup.configure(bg="#1E1E1E", highlightthickness=2, highlightbackground=ACCENT)
         
-        # Top Badge
-        self.lbl_badge = tk.Label(self.popup, text="[SYSTEM: ACTIVE]", font=("Consolas", 10, "bold"), fg=SUCCESS, bg="#1E1E1E")
-        self.lbl_badge.pack(anchor="w", padx=20, pady=(20, 0))
+        # Top Badge & Cancel Button Frame
+        top_frame = tk.Frame(self.popup, bg="#1E1E1E")
+        top_frame.pack(fill=tk.X, padx=20, pady=(20, 0))
         
-        # Title (Hierarchy 1)
+        self.lbl_badge = tk.Label(top_frame, text="[SYSTEM: ACTIVE]", font=("Consolas", 10, "bold"), fg=SUCCESS, bg="#1E1E1E")
+        self.lbl_badge.pack(side=tk.LEFT)
+        
+        self.btn_cancel = tk.Button(top_frame, text="STOP", bg=DANGER, fg="white", font=("Segoe UI", 9, "bold"), bd=0, padx=15, pady=2, cursor="hand2", command=cancel_callback)
+        self.btn_cancel.pack(side=tk.RIGHT)
+        
+        # Title
         self.lbl_title = tk.Label(self.popup, text="INITIALIZING NEURAL ENGINE...", font=("Segoe UI", 16, "bold"), fg="#FFFFFF", bg="#1E1E1E")
-        self.lbl_title.pack(pady=(10, 5))
+        self.lbl_title.pack(pady=(5, 5))
         
-        # Log Line (Hierarchy 2)
+        # Log Line
         self.lbl_log = tk.Label(self.popup, text="[SYS] Awaiting process start...", font=("Consolas", 11), fg="#A0A0A0", bg="#1E1E1E")
         self.lbl_log.pack(pady=(0, 15))
         
@@ -96,21 +96,45 @@ class LoadingOverlay:
         style.theme_use('default')
         style.configure("Pro.Horizontal.TProgressbar", background=ACCENT, troughcolor="#333333", bordercolor="#1E1E1E", thickness=6)
         self.progress_var = tk.DoubleVar()
-        self.pbar = ttk.Progressbar(self.popup, variable=self.progress_var, maximum=100, length=460, style="Pro.Horizontal.TProgressbar")
+        self.pbar = ttk.Progressbar(self.popup, variable=self.progress_var, maximum=100, length=480, style="Pro.Horizontal.TProgressbar")
         self.pbar.pack(pady=5)
         
-        # Telemetry Box (Industrial Details)
+        # Telemetry Box (3-Column Dashboard)
         tele_frame = tk.Frame(self.popup, bg="#151515", bd=1, relief=tk.SOLID)
-        tele_frame.pack(fill=tk.X, padx=45, pady=15)
+        tele_frame.pack(fill=tk.X, padx=40, pady=15)
         
-        self.lbl_rate = tk.Label(tele_frame, text="Processing Rate : 0.0 files/sec", font=("Consolas", 10), fg="#A0A0A0", bg="#151515")
-        self.lbl_rate.pack(anchor="w", padx=15, pady=(10, 2))
+        tele_frame.grid_columnconfigure(0, weight=1)
+        tele_frame.grid_columnconfigure(1, weight=1)
+        tele_frame.grid_columnconfigure(2, weight=1)
+
+        # Col 0: SPEED
+        f_speed = tk.Frame(tele_frame, bg="#151515")
+        f_speed.grid(row=0, column=0, pady=15)
+        tk.Label(f_speed, text="[ S P E E D ]", font=("Consolas", 8), fg="#707070", bg="#151515").pack()
         
-        self.lbl_eta = tk.Label(tele_frame, text="Estimated Time  : --:--", font=("Consolas", 10), fg=ACCENT, bg="#151515")
-        self.lbl_eta.pack(anchor="w", padx=15, pady=2)
-        
-        self.lbl_shape = tk.Label(tele_frame, text="Matrix Shape    : (0, 527)", font=("Consolas", 10), fg="#A0A0A0", bg="#151515")
-        self.lbl_shape.pack(anchor="w", padx=15, pady=(2, 10))
+        val_frame_sp = tk.Frame(f_speed, bg="#151515")
+        val_frame_sp.pack()
+        self.lbl_speed_val = tk.Label(val_frame_sp, text="0.0", font=("Segoe UI", 18, "bold"), fg=SUCCESS, bg="#151515")
+        self.lbl_speed_val.pack(side=tk.LEFT)
+        tk.Label(val_frame_sp, text=" f/s", font=("Consolas", 9), fg="#A0A0A0", bg="#151515").pack(side=tk.LEFT, anchor=tk.S, pady=(0, 4))
+
+        # Col 1: ETA
+        f_eta = tk.Frame(tele_frame, bg="#151515")
+        f_eta.grid(row=0, column=1, pady=15)
+        tk.Label(f_eta, text="[ E T A ]", font=("Consolas", 8), fg="#707070", bg="#151515").pack()
+        self.lbl_eta_val = tk.Label(f_eta, text="00:00", font=("Segoe UI", 18, "bold"), fg=ACCENT, bg="#151515")
+        self.lbl_eta_val.pack()
+
+        # Col 2: MATRIX DATA
+        f_data = tk.Frame(tele_frame, bg="#151515")
+        f_data.grid(row=0, column=2, pady=15)
+        tk.Label(f_data, text="[ M A T R I X ]", font=("Consolas", 8), fg="#707070", bg="#151515").pack()
+        val_frame_dt = tk.Frame(f_data, bg="#151515")
+        val_frame_dt.pack()
+        self.lbl_data_val = tk.Label(val_frame_dt, text="0", font=("Segoe UI", 18, "bold"), fg="#FFFFFF", bg="#151515")
+        self.lbl_data_val.pack(side=tk.LEFT)
+        self.lbl_data_total = tk.Label(val_frame_dt, text=" / 0", font=("Consolas", 9), fg="#A0A0A0", bg="#151515")
+        self.lbl_data_total.pack(side=tk.LEFT, anchor=tk.S, pady=(0, 4))
 
     def update_state(self, title, log_msg, progress, is_success=False):
         self.lbl_title.config(text=title.upper())
@@ -118,19 +142,33 @@ class LoadingOverlay:
             self.lbl_badge.config(text="[VALIDATION: PASSED]", fg=SUCCESS)
             self.lbl_title.config(fg=SUCCESS)
             self.lbl_log.config(fg="#FFFFFF")
+            self.btn_cancel.pack_forget()
         self.lbl_log.config(text=log_msg)
         self.progress_var.set(progress)
         
     def update_telemetry(self, i, total, rate, eta_sec):
-        self.lbl_rate.config(text=f"Processing Rate : {rate:.1f} files/sec")
+        # 1. Update Speed with Dynamic Colors
+        self.lbl_speed_val.config(text=f"{rate:.1f}")
+        if rate >= 30.0:
+            color = SUCCESS # Fast -> Green
+        elif rate >= 15.0:
+            color = WARNING_COL # Med -> Orange
+        else:
+            color = DANGER # Slow -> Red
+        self.lbl_speed_val.config(fg=color)
+        
+        # 2. Update ETA
         if eta_sec < 0: eta_sec = 0
         eta_m, eta_s = divmod(int(eta_sec), 60)
-        self.lbl_eta.config(text=f"Estimated Time  : {eta_m:02d}:{eta_s:02d}")
-        self.lbl_shape.config(text=f"Matrix Shape    : ({i}, 527)")
+        self.lbl_eta_val.config(text=f"{eta_m:02d}:{eta_s:02d}")
+        
+        # 3. Update Data Progress
+        self.lbl_data_val.config(text=f"{i}")
+        self.lbl_data_total.config(text=f" / {total}")
 
     def close(self):
+        self.popup.grab_release()
         self.popup.destroy()
-        self.dim.destroy()
 
 class SmartWaveTrainer(tk.Tk):
     def __init__(self):
@@ -138,6 +176,8 @@ class SmartWaveTrainer(tk.Tk):
         self.title('SmartWave OCSVM Trainer (Pro)')
         self.geometry('1280x850')
         self.configure(bg=BG_COLOR)
+        
+        self.is_cancelled = False
         
         self.engine = PANNsEngine()
         header_text = f"SmartWave OCSVM Trainer - Engine: {self.engine.mode.upper()} ({self.engine.dim}-dim)"
@@ -190,20 +230,37 @@ class SmartWaveTrainer(tk.Tk):
         self.after(0, self._append_log, msg)
 
     def _append_log(self, msg):
+        # 1. Update UI Text Widget
         self.log_text.insert(tk.END, msg + "\n")
         self.log_text.see(tk.END)
         
+        # 2. Save to Log File (Automatic Log Saving)
+        log_file = "trainer_history.log"
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"[{timestamp}] {msg}\n")
+        except Exception:
+            pass
+        
+    def _cancel_process(self):
+        self.is_cancelled = True
+        self.overlay.btn_cancel.config(state=tk.DISABLED, text="STOPPING...")
+        self.overlay.update_state("ABORTING OPERATION...", "[WRN] Cancellation requested by user.", self.overlay.progress_var.get())
+        self.safe_log("[WRN] Stop signal received. Halting process...")
+
     def start_training_thread(self):
         dataset_dir = filedialog.askdirectory(title="Select Dataset Folder")
         if not dataset_dir: return
         
         normal_dir = os.path.join(dataset_dir, 'normal')
         if not os.path.exists(normal_dir):
-            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing.")
+            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing in {dataset_dir}.")
             return
             
+        self.is_cancelled = False
         self.train_btn.config(state=tk.DISABLED, text="Processing...", bg=MUTED)
-        self.overlay = LoadingOverlay(self)
+        self.overlay = LoadingOverlay(self, cancel_callback=self._cancel_process)
         
         thread = threading.Thread(target=self._train_task, args=(normal_dir,), daemon=True)
         thread.start()
@@ -213,7 +270,8 @@ class SmartWaveTrainer(tk.Tk):
             with wave.open(p, 'rb') as w:
                 return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
 
-        self.safe_log(f"[SYS] Processing started on {normal_dir}")
+        self.safe_log(f"\n[SYS] Processing started on {normal_dir}")
+        self.safe_log(f"[SYS] Parameters - Gamma: {self.gamma_var.get()}, Nu: {self.nu_var.get()}")
         self.after(0, self.overlay.update_state, "EXTRACTING ACOUSTIC VECTORS", "[PRC] Parsing .wav files...", 0)
         
         X = []
@@ -227,14 +285,19 @@ class SmartWaveTrainer(tk.Tk):
 
         start_time = time.time()
         for i, f in enumerate(files):
+            if self.is_cancelled:
+                self.safe_log("[WRN] Operation aborted during embedding extraction.")
+                self.after(0, self._reset_ui)
+                return
+                
             # Telemetry update
-            if i % 10 == 0 or i == total_files - 1:
+            if i % 5 == 0 or i == total_files - 1:
                 progress = (i / total_files) * 60 # Extraction takes 60% of total bar
                 elapsed = time.time() - start_time
                 rate = i / elapsed if elapsed > 0 else 0
                 eta_sec = (total_files - i) / rate if rate > 0 else 0
                 
-                self.after(0, self.overlay.update_state, "EXTRACTING ACOUSTIC VECTORS", f"[PRC] Processing Batch {i}/{total_files}...", progress)
+                self.after(0, self.overlay.update_state, "EXTRACTING ACOUSTIC VECTORS", f"[PRC] Processing Vector Batch...", progress)
                 self.after(0, self.overlay.update_telemetry, i, total_files, rate, eta_sec)
 
             audio = read_wav(os.path.join(normal_dir, f))
@@ -243,14 +306,22 @@ class SmartWaveTrainer(tk.Tk):
             X.append(emb)
             
         X = np.array(X)
-        self.safe_log(f"[OUT] Matrix Shape: {X.shape}")
+        self.safe_log(f"[OUT] Extracted Matrix Shape: {X.shape}")
         
+        if self.is_cancelled:
+            self.after(0, self._reset_ui)
+            return
+            
         # Scaling
         self.after(0, self.overlay.update_state, "STANDARDIZING FEATURE SPACE", "[PRC] Applying StandardScaler...", 70)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
-        time.sleep(0.3) # Artificial slight pause for visual polish
+        time.sleep(0.3) 
         
+        if self.is_cancelled:
+            self.after(0, self._reset_ui)
+            return
+            
         # OCSVM
         gamma = self.gamma_var.get()
         nu = self.nu_var.get()
@@ -286,7 +357,8 @@ class SmartWaveTrainer(tk.Tk):
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(out, f, indent=2)
             
-        self.safe_log(f"[OUT] Model exported to {out_path} (SVs: {len(svs)})")
+        self.safe_log(f"[OUT] Model parameters exported to: {out_path}")
+        self.safe_log(f"[OUT] Extracted Support Vectors: {len(svs)}")
         
         self.after(0, self.overlay.update_state, "EXPORT COMPLETE", "[OUT] Serialization Weights Saved.", 100, True)
         time.sleep(1.0) # Show 100% completion state briefly
@@ -294,8 +366,7 @@ class SmartWaveTrainer(tk.Tk):
         self.after(0, self._finalize_train, X_scaled, ocsvm, last_audio)
 
     def _finalize_train(self, X_scaled, ocsvm, last_audio):
-        self.overlay.close()
-        self.train_btn.config(state=tk.NORMAL, text="Load Dataset & Train", bg=ACCENT)
+        self._reset_ui()
         self.safe_log("[CHK] Visualization Render Sequence Triggered.")
         
         self.ax_wave.clear()
@@ -332,7 +403,7 @@ class SmartWaveTrainer(tk.Tk):
             
         self.fig.tight_layout()
         self.canvas.draw()
-        self.safe_log("[SYS] Ready for next task.")
+        self.safe_log("[SYS] Process Completed Successfully.")
 
     def _reset_ui(self):
         try: self.overlay.close()
