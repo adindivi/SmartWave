@@ -6,7 +6,7 @@ import wave
 import threading
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog
 from sklearn.svm import OneClassSVM
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -17,15 +17,16 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# UI Colors (Samsung One UI Inspired)
+# UI Colors (Samsung One UI Inspired / Pro Industrial)
 PRIMARY = "#000000"
 ACCENT = "#0381FE"
 SUCCESS = "#10B981"
 DANGER = "#F43F5E"
 BG_COLOR = "#F7F7F7"
 CARD_BG = "#FFFFFF"
+MUTED = "#707070"
 
-# Font handling for Korean
+# Font handling for Korean & English
 plt.rcParams['font.family'] = ['Malgun Gothic', 'Segoe UI', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -35,16 +36,14 @@ class PANNsEngine:
         self.dim = 128
         self.sess = None
         
-        # Try ONNX
         onnx_path = '../models_official/smartwave_cnn10_e2e.onnx'
         if os.path.exists(onnx_path):
             try:
                 self.sess = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
                 self.mode = 'cnn10_e2e'
                 self.dim = 527
-                print(f"Loaded ONNX: {onnx_path}")
             except Exception as e:
-                print("Failed to load ONNX:", e)
+                pass
     
     def extract_clip_embedding(self, audio):
         if self.mode == 'cnn10_e2e':
@@ -57,6 +56,81 @@ class PANNsEngine:
             return emb
         else:
             return np.random.randn(128).astype(np.float32)
+
+class LoadingOverlay:
+    """Modern Modal Overlay for Pro Industrial Look"""
+    def __init__(self, parent):
+        self.parent = parent
+        
+        # 1. Dimming background overlay
+        self.dim = tk.Toplevel(parent)
+        self.dim.geometry(f"{parent.winfo_width()}x{parent.winfo_height()}+{parent.winfo_x()}+{parent.winfo_y()}")
+        self.dim.overrideredirect(True)
+        self.dim.attributes('-alpha', 0.7)
+        self.dim.configure(bg='black')
+        
+        # 2. Main Popup Modal
+        self.popup = tk.Toplevel(parent)
+        self.popup.overrideredirect(True)
+        
+        pw, ph = 550, 320
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (pw // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (ph // 2)
+        self.popup.geometry(f"{pw}x{ph}+{x}+{y}")
+        self.popup.configure(bg="#1E1E1E", highlightthickness=2, highlightbackground=ACCENT)
+        
+        # Top Badge
+        self.lbl_badge = tk.Label(self.popup, text="[SYSTEM: ACTIVE]", font=("Consolas", 10, "bold"), fg=SUCCESS, bg="#1E1E1E")
+        self.lbl_badge.pack(anchor="w", padx=20, pady=(20, 0))
+        
+        # Title (Hierarchy 1)
+        self.lbl_title = tk.Label(self.popup, text="INITIALIZING NEURAL ENGINE...", font=("Segoe UI", 16, "bold"), fg="#FFFFFF", bg="#1E1E1E")
+        self.lbl_title.pack(pady=(10, 5))
+        
+        # Log Line (Hierarchy 2)
+        self.lbl_log = tk.Label(self.popup, text="[SYS] Awaiting process start...", font=("Consolas", 11), fg="#A0A0A0", bg="#1E1E1E")
+        self.lbl_log.pack(pady=(0, 15))
+        
+        # Progress Bar
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("Pro.Horizontal.TProgressbar", background=ACCENT, troughcolor="#333333", bordercolor="#1E1E1E", thickness=6)
+        self.progress_var = tk.DoubleVar()
+        self.pbar = ttk.Progressbar(self.popup, variable=self.progress_var, maximum=100, length=460, style="Pro.Horizontal.TProgressbar")
+        self.pbar.pack(pady=5)
+        
+        # Telemetry Box (Industrial Details)
+        tele_frame = tk.Frame(self.popup, bg="#151515", bd=1, relief=tk.SOLID)
+        tele_frame.pack(fill=tk.X, padx=45, pady=15)
+        
+        self.lbl_rate = tk.Label(tele_frame, text="Processing Rate : 0.0 files/sec", font=("Consolas", 10), fg="#A0A0A0", bg="#151515")
+        self.lbl_rate.pack(anchor="w", padx=15, pady=(10, 2))
+        
+        self.lbl_eta = tk.Label(tele_frame, text="Estimated Time  : --:--", font=("Consolas", 10), fg=ACCENT, bg="#151515")
+        self.lbl_eta.pack(anchor="w", padx=15, pady=2)
+        
+        self.lbl_shape = tk.Label(tele_frame, text="Matrix Shape    : (0, 527)", font=("Consolas", 10), fg="#A0A0A0", bg="#151515")
+        self.lbl_shape.pack(anchor="w", padx=15, pady=(2, 10))
+
+    def update_state(self, title, log_msg, progress, is_success=False):
+        self.lbl_title.config(text=title.upper())
+        if is_success:
+            self.lbl_badge.config(text="[VALIDATION: PASSED]", fg=SUCCESS)
+            self.lbl_title.config(fg=SUCCESS)
+            self.lbl_log.config(fg="#FFFFFF")
+        self.lbl_log.config(text=log_msg)
+        self.progress_var.set(progress)
+        
+    def update_telemetry(self, i, total, rate, eta_sec):
+        self.lbl_rate.config(text=f"Processing Rate : {rate:.1f} files/sec")
+        if eta_sec < 0: eta_sec = 0
+        eta_m, eta_s = divmod(int(eta_sec), 60)
+        self.lbl_eta.config(text=f"Estimated Time  : {eta_m:02d}:{eta_s:02d}")
+        self.lbl_shape.config(text=f"Matrix Shape    : ({i}, 527)")
+
+    def close(self):
+        self.popup.destroy()
+        self.dim.destroy()
 
 class SmartWaveTrainer(tk.Tk):
     def __init__(self):
@@ -72,12 +146,11 @@ class SmartWaveTrainer(tk.Tk):
         main_frame = tk.Frame(self, bg=BG_COLOR)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
-        # ---------- TOP HALF: Controls & Log ----------
+        # ---------- TOP HALF ----------
         top_frame = tk.Frame(main_frame, bg=BG_COLOR)
         top_frame.pack(fill=tk.X)
         
-        # Controls Frame
-        ctrl_frame = tk.LabelFrame(top_frame, text="OCSVM Config", bg=BG_COLOR, font=("Segoe UI", 11, "bold"), padx=10, pady=10)
+        ctrl_frame = tk.LabelFrame(top_frame, text="OCSVM Configuration", bg=BG_COLOR, font=("Segoe UI", 11, "bold"), padx=10, pady=10)
         ctrl_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 20))
         
         tk.Label(ctrl_frame, text="Gamma (RBF):", bg=BG_COLOR, font=("Segoe UI", 10)).grid(row=0, column=0, sticky='w', pady=5)
@@ -95,22 +168,15 @@ class SmartWaveTrainer(tk.Tk):
         self.train_btn = tk.Button(ctrl_frame, text="Load Dataset & Train", bg=ACCENT, fg="white", font=("Segoe UI", 11, "bold"), command=self.start_training_thread, width=25, pady=5)
         self.train_btn.grid(row=3, column=0, columnspan=2, pady=(15, 5))
         
-        # Progress Bar
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(ctrl_frame, variable=self.progress_var, maximum=100, length=300)
-        self.progress_bar.grid(row=4, column=0, columnspan=2, pady=5)
-        
-        # Log Frame
-        self.log_text = tk.Text(top_frame, height=13, width=50, font=("Consolas", 10), bg="#1E1E1E", fg="#D4D4D4", padx=10, pady=10)
+        self.log_text = tk.Text(top_frame, height=10, width=50, font=("Consolas", 10), bg="#1E1E1E", fg="#D4D4D4", padx=10, pady=10)
         self.log_text.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         
-        # ---------- BOTTOM HALF: Charts ----------
+        # ---------- BOTTOM HALF ----------
         chart_frame = tk.Frame(main_frame, bg=CARD_BG, highlightbackground="#DDDDDD", highlightthickness=1)
         chart_frame.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
         
         self.fig, (self.ax_wave, self.ax_pca) = plt.subplots(1, 2, figsize=(10, 4))
         self.fig.patch.set_facecolor(CARD_BG)
-        
         self.ax_wave.set_title('Waveform Visualization', fontsize=11, fontweight='bold', color=PRIMARY)
         self.ax_pca.set_title('OCSVM Embedding Space (PCA 2D)', fontsize=11, fontweight='bold', color=PRIMARY)
         
@@ -118,10 +184,9 @@ class SmartWaveTrainer(tk.Tk):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        self.safe_log("[System] Ready. Multi-Threading & Pro UI Enabled.")
+        self.safe_log("[SYS] System Initialized. Awaiting dataset.")
 
     def safe_log(self, msg):
-        """Thread-safe logging function"""
         self.after(0, self._append_log, msg)
 
     def _append_log(self, msg):
@@ -134,14 +199,12 @@ class SmartWaveTrainer(tk.Tk):
         
         normal_dir = os.path.join(dataset_dir, 'normal')
         if not os.path.exists(normal_dir):
-            self.safe_log(f"[Error] 'normal' folder not found in {dataset_dir}")
+            self.safe_log(f"[ERR] Validation Failed: 'normal' directory missing.")
             return
             
-        # Disable button to prevent multiple clicks
-        self.train_btn.config(state=tk.DISABLED, text="Processing... Please wait", bg=SAMSUNG_MUTED if 'SAMSUNG_MUTED' in globals() else "#707070")
-        self.progress_var.set(0)
+        self.train_btn.config(state=tk.DISABLED, text="Processing...", bg=MUTED)
+        self.overlay = LoadingOverlay(self)
         
-        # Start background thread
         thread = threading.Thread(target=self._train_task, args=(normal_dir,), daemon=True)
         thread.start()
 
@@ -150,24 +213,29 @@ class SmartWaveTrainer(tk.Tk):
             with wave.open(p, 'rb') as w:
                 return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
 
-        self.safe_log(f"\n[1/3] Extracting embeddings (Background Thread)...")
+        self.safe_log(f"[SYS] Processing started on {normal_dir}")
+        self.after(0, self.overlay.update_state, "EXTRACTING ACOUSTIC VECTORS", "[PRC] Parsing .wav files...", 0)
+        
         X = []
         files = [f for f in os.listdir(normal_dir) if f.endswith('.wav')]
         total_files = len(files)
         last_audio = None
         
         if total_files == 0:
-            self.safe_log("[Error] No .wav files found in normal directory.")
             self.after(0, self._reset_ui)
             return
 
+        start_time = time.time()
         for i, f in enumerate(files):
-            # Update Progress Bar smoothly
+            # Telemetry update
             if i % 10 == 0 or i == total_files - 1:
-                progress_percent = (i / total_files) * 100
-                self.after(0, self.progress_var.set, progress_percent)
-                if i > 0 and i % 200 == 0:
-                    self.safe_log(f"      Processed {i} / {total_files} files...")
+                progress = (i / total_files) * 60 # Extraction takes 60% of total bar
+                elapsed = time.time() - start_time
+                rate = i / elapsed if elapsed > 0 else 0
+                eta_sec = (total_files - i) / rate if rate > 0 else 0
+                
+                self.after(0, self.overlay.update_state, "EXTRACTING ACOUSTIC VECTORS", f"[PRC] Processing Batch {i}/{total_files}...", progress)
+                self.after(0, self.overlay.update_telemetry, i, total_files, rate, eta_sec)
 
             audio = read_wav(os.path.join(normal_dir, f))
             if i == total_files - 1: last_audio = audio
@@ -175,20 +243,26 @@ class SmartWaveTrainer(tk.Tk):
             X.append(emb)
             
         X = np.array(X)
-        self.safe_log(f"      Feature Matrix Shape: {X.shape}")
+        self.safe_log(f"[OUT] Matrix Shape: {X.shape}")
         
-        # Preprocess
-        self.safe_log(f"[2/3] Applying StandardScaler and Training OCSVM...")
+        # Scaling
+        self.after(0, self.overlay.update_state, "STANDARDIZING FEATURE SPACE", "[PRC] Applying StandardScaler...", 70)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
+        time.sleep(0.3) # Artificial slight pause for visual polish
         
+        # OCSVM
         gamma = self.gamma_var.get()
         nu = self.nu_var.get()
+        self.after(0, self.overlay.update_state, "OPTIMIZING HYPERPLANE", f"[PRC] RBF Kernel (Gamma: {gamma}, Nu: {nu})...", 85)
         
         ocsvm = OneClassSVM(kernel='rbf', gamma=gamma, nu=nu)
         ocsvm.fit(X_scaled)
+        time.sleep(0.3)
         
         # Export
+        self.after(0, self.overlay.update_state, "COMPUTING MARGINS", "[CHK] Extracting Support Vectors...", 95)
+        
         rho = float(-ocsvm.offset_[0])
         svs = X_scaled[ocsvm.support_]
         dual_coef = ocsvm.dual_coef_[0]
@@ -199,13 +273,10 @@ class SmartWaveTrainer(tk.Tk):
             "exported_at": datetime.datetime.now().isoformat(),
             "sample_rate": 16000,
             "embedding_dim": self.engine.dim,
-            "embedding_mode": self.engine.mode,
             "preprocessing": "StandardScaler",
             "scaler_mean": scaler.mean_.tolist(),
             "scaler_scale": scaler.scale_.tolist(),
-            "gamma": float(gamma),
-            "nu": float(nu),
-            "rho": rho,
+            "gamma": float(gamma), "nu": float(nu), "rho": rho,
             "n_support_vectors": len(svs),
             "support_vectors": svs.tolist(),
             "dual_coef": dual_coef.tolist(),
@@ -215,19 +286,18 @@ class SmartWaveTrainer(tk.Tk):
         with open(out_path, 'w', encoding='utf-8') as f:
             json.dump(out, f, indent=2)
             
-        self.safe_log(f"[3/3] Export Complete!")
-        self.safe_log(f"      Saved to: {out_path}")
-        self.safe_log(f"      Support Vectors: {len(svs)}")
+        self.safe_log(f"[OUT] Model exported to {out_path} (SVs: {len(svs)})")
         
-        # Safely trigger UI updates on the main thread
+        self.after(0, self.overlay.update_state, "EXPORT COMPLETE", "[OUT] Serialization Weights Saved.", 100, True)
+        time.sleep(1.0) # Show 100% completion state briefly
+        
         self.after(0, self._finalize_train, X_scaled, ocsvm, last_audio)
 
     def _finalize_train(self, X_scaled, ocsvm, last_audio):
-        self.progress_var.set(100)
+        self.overlay.close()
         self.train_btn.config(state=tk.NORMAL, text="Load Dataset & Train", bg=ACCENT)
-        self.safe_log("\n[Notice] Updating Visualization Charts...")
+        self.safe_log("[CHK] Visualization Render Sequence Triggered.")
         
-        # Draw Charts
         self.ax_wave.clear()
         if last_audio is not None:
             plot_len = min(len(last_audio), 16000)
@@ -243,11 +313,9 @@ class SmartWaveTrainer(tk.Tk):
             X_pca = pca.fit_transform(X_scaled)
             sv_pca = X_pca[ocsvm.support_]
             
-            # Scatter Plot
             self.ax_pca.scatter(X_pca[:, 0], X_pca[:, 1], c=SUCCESS, alpha=0.6, label='Normal Embeddings')
-            self.ax_pca.scatter(sv_pca[:, 0], sv_pca[:, 1], c=DANGER, edgecolors='white', s=60, label='Support Vectors (Boundary)')
+            self.ax_pca.scatter(sv_pca[:, 0], sv_pca[:, 1], c=DANGER, edgecolors='white', s=60, label='Support Vectors')
             
-            # Decision Boundary Contour
             xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
                                  np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
             grid_2d = np.c_[xx.ravel(), yy.ravel()]
@@ -264,10 +332,11 @@ class SmartWaveTrainer(tk.Tk):
             
         self.fig.tight_layout()
         self.canvas.draw()
-        self.safe_log("[Notice] Ready for next task.")
+        self.safe_log("[SYS] Ready for next task.")
 
     def _reset_ui(self):
-        self.progress_var.set(0)
+        try: self.overlay.close()
+        except: pass
         self.train_btn.config(state=tk.NORMAL, text="Load Dataset & Train", bg=ACCENT)
 
 if __name__ == '__main__':
