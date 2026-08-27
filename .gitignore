@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+venv/
+env/
+dataset/
+models_official/*.tflite
+models_official/*.safetensors
+models_official/*.onnx
+models_official/*.bin
+.DS_Store

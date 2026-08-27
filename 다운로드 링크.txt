@@ -1,0 +1,23 @@
+SmartWave 프로젝트 관련 모델 및 데이터 다운로드 링크 정리
+
+================================================================
+1. [STEP 2] PANNs 공식 모델 (HuggingFace)
+================================================================
+* CNN10 PyTorch 가중치 (model.safetensors, 약 25MB)
+  - 용도: E2E ONNX 모델 빌드용 (PC 추론용 핵심 모델)
+  - URL: https://huggingface.co/nicofarr/panns_Cnn10/resolve/main/model.safetensors
+
+* CNN14 TFLite 모델 (cnn14_audioset_fp16.tflite, 약 155MB)
+  - 용도: 안드로이드 대안용 (LiteRT)
+  - URL: https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/cnn14_audioset_fp16.tflite
+
+* Mel filterbank (mel_basis.bin, 약 129KB)
+  - 용도: 멜 스펙트로그램 변환 파라미터 (안드로이드 전처리 폴백용)
+  - URL: https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/mel_basis.bin
+
+================================================================
+2. [STEP 6] MIMII 실제 테스트 데이터셋 (HuggingFace)
+================================================================
+* 펌프(Pump) 모터 사운드 검증용 데이터 (train-00000-of-00002.parquet, 약 340MB)
+  - 용도: 실제 산업 현장 소음(MIMII 데이터셋)을 활용한 모델 성능 검증
+  - URL: https://huggingface.co/datasets/stdt1/MIMII_pump_datasets_16kHz_RMS_10s_V2/resolve/main/mel_nfft1024_hl512_nmels64_hann/train-00000-of-00002.parquet

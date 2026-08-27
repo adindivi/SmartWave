@@ -1,0 +1,1118 @@
+================================================================
+
+SmartWave 산업 음향 AI — 새PC 재시작 단계별 프롬프트 가이드
+
+최종 검증 성능: F1 90.8% / AUC 95.8% (MIMII 실제 데이터)
+
+작성일: 2026-08-26
+
+
+
+이 파일을 Claude Code에 붙여넣으면 새 PC에서 처음부터
+
+모든 것을 자동으로 재현할 수 있습니다.
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+전체 단계 요약 (8단계)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+STEP 1 Python 환경 + 패키지 설치
+
+STEP 2 공식 PANNs 모델 다운로드 (HuggingFace)
+
+STEP 3 CNN10 E2E ONNX 모델 빌드 (MelSpec 레이어 내장)
+
+STEP 4 PC 학습 프로그램 구축 (tkinter GUI)
+
+STEP 5 합성 데이터셋 생성 + OCSVM POC 검증 STEP 6 MIMII 실제 데이터 다운로드 + 최적화 검증
+
+STEP 7 Android 앱 구축 + 모델 배포
+
+STEP 8 최종 통합 검증 + 리포트
+
+
+
+소요 시간 예상:
+
+• 환경 설치: 10분
+
+• 모델 다운로드: 10분 (CNN10 25MB + CNN14 155MB)
+
+• E2E 빌드: 3분 - PC 프로그램 구축: Claude 자동 (~5분)
+
+• MIMII 다운로드+검증: 15분 (340MB)
+
+• Android 앱 구축: Claude 자동 (~10분)
+
+총 소요: 약 1시간
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 0— 시작 전 체크리스트
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+필요한 것:
+
+[ ] Python 3.11.x (3.12+ 일부 패키지 미지원, 3.14 X)
+
+https://www.python.org/downloads/release/python-3119/
+
+[ ] Android Studio (Android 앱 빌드용)
+
+https://developer.android.com/studio
+
+[ ] 인터넷 연결 (모델 다운로드용)
+
+[ ] 저장 공간 1GB 이상
+
+
+
+⚠️ 주의: torch는 반드시 CPU 버전 설치
+
+(CUDA 버전 설치 시 c10_cuda.dll 충돌 오류 발생)
+
+
+
+작업 폴더 생성:
+
+mkdir C:\SmartWave\MVP\SmartWave
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 1 — Python 환경 설정
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave 프로젝트를 새 PC에서 시작합니다.
+
+먼저 Python 패키지 환경을 설치해주세요.
+
+
+
+설치할 패키지:
+
+• numpy, scikit-learn, matplotlib (기본 ML)
+
+• ai-edge-litert (TFLite 런타임)
+
+• onnxruntime (E2E ONNX 추론 - 핵심)
+
+• onnx (ONNX 모델 빌드)
+
+• safetensors (CNN10 가중치 로딩)
+
+• huggingface_hub (모델 다운로드)
+
+• requests, pandas (데이터 처리)
+
+• torch==2.4.1+cpu (CPU 전용 - CUDA X)
+
+--index-url https://download.pytorch.org/whl/cpu
+
+
+
+실행 후 다음을 확인해주세요:
+
+python -c "import numpy, sklearn, onnxruntime, safetensors; print('OK')"
+
+
+
+작업 디렉토리: [여기에 작업 경로 입력]
+
+──────────────────────────────────────────────────────────
+
+
+
+[직접 실행 명령어]
+
+pip install numpy scikit-learn matplotlib ai-edge-litert onnxruntime onnx safetensors huggingface_hub requests pandas
+
+pip install torch==2.4.1+cpu --index-url https://download.pytorch.org/whl/cpu
+
+
+
+[완료 확인]
+
+python -c "import numpy, sklearn, onnxruntime; print('[OK] 환경 준비 완료')"
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2 — 공식 PANNs 모델 다운로드
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave 프로젝트에 필요한 PANNs 공식 모델을 다운로드해주세요.
+
+
+
+다운로드 대상:
+
+1. CNN10 PyTorch 가중치 (25MB) - E2E ONNX 빌드용
+
+HuggingFace: nicofarr/panns_Cnn10
+
+파일명: model.safetensors
+
+
+
+2. CNN14 TFLite 모델 (155MB) - Android 대안용
+
+HuggingFace: litert-community/PANNs-CNN14-AudioSet-LiteRT
+
+파일명: cnn14_audioset_fp16.tflite
+
+
+
+3. Mel filterbank (129KB)
+
+동일 저장소 파일명: mel_basis.bin
+
+
+
+저장 경로: [작업경로]/models_official/
+
+
+
+다운로드 후 파일 크기를 확인하고, model.safetensors의
+
+첫 번째 레이어 키 목록을 출력해 확인해주세요.
+
+(backbone.spectrogram_extractor.stft.conv_real.weight 키가 있어야 함)
+
+──────────────────────────────────────────────────────────
+
+
+
+[직접 실행 코드]
+
+python -c "
+
+from huggingface_hub import hf_hub_download
+
+import os
+
+OUT = 'models_official'
+
+os.makedirs(OUT, exist_ok=True)
+
+
+
+print('[1/3] CNN10 safetensors...')
+
+hf_hub_download('nicofarr/panns_Cnn10', 'model.safetensors', local_dir=OUT)
+
+
+
+print('[2/3] CNN14 TFLite (155MB)...')
+
+hf_hub_download('litert-community/PANNs-CNN14-AudioSet-LiteRT',
+
+'cnn14_audioset_fp16.tflite', local_dir=OUT)
+
+
+
+print('[3/3] Mel filterbank...')
+
+hf_hub_download('litert-community/PANNs-CNN14-AudioSet-LiteRT', 'mel_basis.bin', local_dir=OUT)
+
+print('완료!')
+
+"
+
+
+
+[완료 확인]
+
+핵심: model.safetensors에
+
+backbone.spectrogram_extractor.stft.conv_real.weight (513,1,1024)
+
+backbone.logmel_extractor.melW (513,64)
+
+두 키가 있어야 E2E 모델 빌드 가능
+
+
+
+⚠️ 중요: model.safetensors 안에 이미 STFT + Mel 레이어가 내장됨
+
+별도 전처리 코드 불필요 (End-to-End 방식 자동 적용됨)
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 3 — CNN10 E2E ONNX 모델 빌드
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[핵심 개념]
+
+model.safetensors에 이미 STFT + Mel 레이어가 내장되어 있음
+
+→ raw audio를 넣으면 내부에서 자동으로 mel 변환 후 CNN10 통과
+
+→ PC와 Android가 정확히 동일한 계산 수행 (100% 정합성)
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave CNN10 E2E ONNX 모델을 빌드해주세요.
+
+
+
+목표: build_e2e_final.py 작성 및 실행
+
+입력: [작업경로]/models_official/model.safetensors
+
+출력: [작업경로]/models_official/smartwave_cnn10_e2e.onnx
+
+
+
+핵심 사항:
+
+• model.safetensors에 STFT conv1d + Mel filterbank가 이미 내장됨
+
+◦ backbone.spectrogram_extractor.stft.conv_real.weight (513,1,1024)
+
+◦ backbone.spectrogram_extractor.stft.conv_imag.weight (513,1,1024)
+
+◦ backbone.logmel_extractor.melW (513,64)
+
+• torch 없이 safetensors + onnx Python 라이브러리만으로 빌드
+
+• ONNX opset=14, ir_version=8 사용 (onnxruntime 1.20 호환)
+
+• Unsqueeze 노드는 axes를 별도 input tensor로 전달
+
+
+
+빌드 후 동작 확인:
+
+import numpy as np, onnxruntime as ort
+
+sess = ort.InferenceSession('models_official/smartwave_cnn10_e2e.onnx',
+
+providers=['CPUExecutionProvider'])
+
+audio = np.random.randn(1, 160000).astype(np.float32) * 0.05
+
+emb = sess.run(None, {'audio': audio})[0][0]
+
+print(f'[OK] shape={emb.shape}, norm={np.linalg.norm(emb):.4f}')
+
+기대값: shape=(527,), norm=1.0000
+
+──────────────────────────────────────────────────────────
+
+
+
+[예상 결과]
+
+models_official/smartwave_cnn10_e2e.onnx (약 25MB)
+
+[OK] shape=(527,), norm=1.0000
+
+
+
+[설계 원칙]
+
+"멜-스펙트로그램 변환 레이어를 앞단에 접합"
+
+→ 입력: [1, 160000] float32 raw audio @16kHz
+
+→ 내부: STFT(내장) → Mel(내장) → CNN10 4개 블록 → FC → 527-dim
+
+→ 출력: [1, 527] float32 L2-정규화 임베딩
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 4 — PC 학습프로그램 구축
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave PC 학습 프로그램을 구축해주세요.
+
+
+
+파일 위치: [작업경로]/smartwave_ocsvm_trainer/smartwave_ocsvm_trainer.py
+
+
+
+핵심 사양:
+
+1. Python tkinterGUI (Samsung One UI 디자인)
+
+색상: Primary=#000000, Accent=#0381FE, Success=#10B981, Danger=#F43F5E
+
+
+
+2. PANNsEngine 클래스 (모델 로딩 우선순위):
+
+① smartwave_cnn10_e2e.onnx (onnxruntime) → embedding_mode='cnn10_e2e', dim=527
+
+② cnn14_audioset_fp16.tflite (ai-edge-litert) → embedding_mode='cnn14_tflite', dim=527
+
+③ mel_stats 폴백 → embedding_mode='mel_stats', dim=1283. extract_clip_embedding(audio_10s):
+
+◦ cnn10_e2e 모드: audio[:160000] → ONNX → 527-dim (10초 통째로)
+
+◦ 슬라이딩 윈도우: 1초 window, 0.5초 hop, 평균 풀링
+
+
+
+4. OCSVM 학습 (sklearn.svm.OneClassSVM):
+
+◦ kernel='rbf', gamma 슬라이더 기본값=0.001 (527-dim 기준)
+
+◦ nu 슬라이더 기본값=0.10
+
+◦ StandardScaler 자동 적용 후 학습
+
+
+
+5. 내보내기 (ocsvm_params.json):
+
+{
+
+equipment_name, equipment_key, exported_at,
+
+sample_rate, n_fft, hop_length, n_mels,
+
+embedding_dim, embedding_mode, model_file,
+
+preprocessing: "StandardScaler",
+
+scaler_mean: [128개 float], ←Android 정합성 핵심
+
+scaler_scale: [128개 float], ← Android 정합성 핵심
+
+gamma, nu,
+
+rho: float(-ocsvm.offset_[0]), ← 부호 주의!
+
+support_vectors: [[...], ...],
+
+dual_coef: [...],
+
+n_support_vectors: int,
+
+metrics: {f1, auc, normal_pass_rate, abnormal_detect_rate}
+
+}
+
+
+
+6. 실행 배치파일: run_trainer.bat
+
+
+
+설비 기본 등록: Motor, Conveyor, Pump, Fan, RoboticArm
+
+참고 파일: [작업경로]/SmartWave PRD.txt
+
+──────────────────────────────────────────────────────────
+
+
+
+[완료 확인]
+
+cd smartwave_ocsvm_trainer && python smartwave_ocsvm_trainer.py
+
+→ GUI 창 실행, 헤더에 "CNN10 E2E ONNX (25.0 MB)" 표시
+
+
+
+[주요 함정]
+
+• gamma 슬라이더 범위: from_=0.0001, to=1.0 (넓게)
+
+• rho = float(-ocsvm.offset_[0]) ← 부호 반드시 음수
+
+• scaler_mean/scale 내보내기 필수 (Android정합성)
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 5 — 합성 데이터셋 생성 + POC 검증
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────
+
+
+
+[기대 결과]
+
+dataset/normal/ (WAV 1,200개)
+
+dataset/abnormal/ (WAV 300개)
+
+F1: 85%+ (합성 데이터 기준)
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 6 — MIMII 실제 데이터 검증 (최우선 권장)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[달성된 성능]
+
+F1 90.8% / AUC 95.8% / 이상탐지율 87.0% / 정상통과율 95.0%
+
+학습: 100개 / 테스트: 정상 200개 + 이상 100개
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave MIMII 실제 데이터로 검증을 진행해주세요.
+
+
+
+데이터 다운로드:
+
+• 출처: HuggingFace stdt1/MIMII_pump_datasets_16kHz_RMS_10s_V2
+
+• 형식: mel_nfft1024_hl512_nmels64_hann config
+
+• 파일: train-00000-of-00002.parquet (340MB)
+
+• 저장: mimii_real/train_part1.parquet
+
+
+
+다운로드 방법:
+
+import requests
+
+url = 'https://huggingface.co/datasets/stdt1/MIMII_pump_datasets_16kHz_RMS_10s_V2/resolve/main/mel_nfft1024_hl512_nmels64_hann/train-00000-of-00002.parquet'
+
+r = requests.get(url, timeout=300, stream=True)
+
+with open('mimii_real/train_part1.parquet', 'wb') as f:
+
+for chunk in r.iter_content(1024*1024): f.write(chunk)
+
+
+
+데이터 구조:
+
+• label=1: 정상 (3881개), label=0: 이상 (531개) ←역전 주의!
+
+• data 컬럼: list of shape (1, 64, 313) mel spectrogram
+
+• data[0]: array(64, 313) → np.array(list(data[0])) 로 변환
+
+
+
+임베딩 방법 (mel_stats 128-dim):
+
+def get_emb(data_field):
+
+mel= np.array(list(data_field[0]), dtype=np.float32) # (64, 313)
+
+return np.concatenate([np.mean(mel,1), np.std(mel,1)]) # (128,)
+
+
+
+최적화 설정:
+
+• 전처리: StandardScaler (scaler_mean, scaler_scale 저장 필수)
+
+• 학습: 정상 100개 (SNR별 균형: -6dB, 0dB, 6dB 각 33개)
+
+• OCSVM: gamma=0.001, nu=0.02 (grid search 최적값)
+
+
+
+기대 성능:
+
+• F1: 90.8%
+
+• AUC-ROC: 95.8%
+
+• 이상 탐지율: 87.0%
+
+• 정상 통과율: 95.0%
+
+결과 저장:
+
+• mimii_real/ocsvm_params_Pump_MIMII_optimized.json
+
+• mimii_real/MIMII_검증_결과_리포트.txt
+
+──────────────────────────────────────────────────────────
+
+
+
+[핵심 최적화 파라미터 (검증 완료)]
+
+gamma=0.001, nu=0.02, 학습샘플=100, StandardScaler 적용
+
+지지벡터: 6개만 사용 (모바일 최적화)
+
+
+
+[onnxruntime JSON 포함 필드]
+
+scaler_mean, scaler_scale ← Android 정합성 필수
+
+support_vectors (6×128)
+
+dual_coef (6개)
+
+rho = float(-ocsvm.offset_[0])
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 7 — Android 앱 구축
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave Android 앱을 구축해주세요.
+
+
+
+프로젝트 구조: [작업경로]/SmartWaveApp/
+
+패키지명: com.smartwave.app
+
+Min SDK: 26, Target: 34, Kotlin
+
+
+
+핵심 의존성 (app/build.gradle):
+
+implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.17.0'
+
+implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+
+implementation 'com.google.code.gson:gson:2.10.1'
+
+implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+
+
+필수 assets (app/src/main/assets/):
+
+• smartwave_cnn10_e2e.onnx (E2E 모델, 25MB)
+
+• ocsvm_params_Motor.json (학습된 OCSVM)
+
+
+
+작성할 Kotlin 파일:
+
+
+
+1. OnnxInference.kt
+
+◦ onnxruntime-android으로 E2E ONNX 추론
+
+◦ 입력: FloatArray(160000) raw audio @16kHz
+
+◦ 출력: FloatArray(527) L2-정규화 임베딩
+
+◦ 메서드: extractEmbedding(audio: FloatArray): FloatArray
+
+
+
+2. OcsvmEngine.kt
+
+◦ JSON 파싱 (scaler_mean, scaler_scale, support_vectors, dual_coef, rho, gamma)
+
+◦ preprocess(x): (x - scaler_mean) / scaler_scale
+
+◦ compute(x, params): Σ dual_coef[i] × exp(-gamma × ||x-sv[i]||²) - rho
+
+◦ anomalyScore(score): score≥0 → 0~40점(정상), score<0 → 41~100점(이상)
+
+◦ score≥0 → 정상, score<0 → 이상
+
+
+
+3. AudioRecorder.kt
+
+◦ AudioRecord, 16000Hz, 16bit PCM, 모노
+
+◦ 10초 녹음 → FloatArray(160000) 반환
+
+
+
+4. MainActivity.kt
+
+◦ 설비 선택 Spinner
+
+◦ 녹음 버튼 (10초 카운트다운)
+
+◦ 결과 카드: 판정(정상/이상), 이상지수 0~100점 - 이력 목록 (최근 5건)
+
+
+
+5. MelProcessor.kt (폴백용)
+
+◦ mel_stats 128-dim 임베딩 (ONNX 없을 때)
+
+
+
+AndroidManifest.xml 권한:
+
+RECORD_AUDIO, READ_EXTERNAL_STORAGE
+
+
+
+Samsung One UI 색상:
+
+Primary=#000000, Accent=#0381FE, Success=#10B981, Danger=#F43F5E
+
+──────────────────────────────────────────────────────────
+
+
+
+[완료 확인]
+
+Android Studio에서 SmartWaveApp 열기 → Gradle Sync → Run
+
+assets/ 폴더에 smartwave_cnn10_e2e.onnx + ocsvm_params.json 필수
+
+
+
+[Android OCSVM 판별 수식]
+
+f(x) = Σᵢ αᵢ × exp(-γ × ||xScaled - svᵢ||²) - ρ
+
+xScaled = (x - scaler_mean) / scaler_scale ← StandardScaler 적용
+
+f(x) ≥ 0 → 정상 / f(x) < 0 → 이상
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 8 — 최종 통합 검증
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[Claude에게 붙여넣을 프롬프트]
+
+──────────────────────────────────────────────────────────
+
+SmartWave 전체 파이프라인 정합성을 최종 검증해주세요.
+
+
+
+검증 항목:
+
+1. ONNX 모델 결정론적 동작 확인
+
+◦ 동일 입력 → 동일 출력 (최대 오차 < 1e-6)
+
+
+
+2. PC-Android OCSVM 일치 확인
+
+◦ Python으로 OCSVM score 계산
+
+◦ Kotlin 공식과 동일 수식 확인
+
+
+
+3. JSON 필드 완전성 확인
+
+필수: equipment_name, gamma, nu, rho,
+
+support_vectors, dual_coef, embedding_dim, embedding_mode,
+
+scaler_mean, scaler_scale ← StandardScaler 필수
+
+
+
+4. 최적 파라미터 적용 확인
+
+◦ embedding_mode: 'cnn10_e2e' or 'mel_stats'
+
+◦ gamma: 0.001 (527-dim E2E), 0.001 (128-dim mel_stats)
+
+◦ nu: 0.02~0.10 (grid search 최적값)
+
+
+
+5. 딥검증 4종 실행 (선택):
+
+◦ Ablation Study (mel_stats vs random vs PANNs)
+
+◦ Fisher 판별비 분석
+
+◦ 5-Fold 교차검증
+
+◦ 파이프라인 일관성 확인
+
+
+
+기대 결과:
+
+동일 입력 최대 오차: < 1e-6
+
+OCSVM score PC vs Android: 동일 (부동소수점 1e-8 이내)
+
+──────────────────────────────────────────────────────────
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+상황별 추가 프롬프트
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[A] 이전 작업 전체를 이어받을 때 (가장 빠름)
+
+──────────────────────────────────────────────────────────
+
+SmartWave 산업 음향 AI 프로젝트를 이어서 진행합니다.
+
+이 폴더를 분석하고 현재 상태를 파악해주세요.
+
+
+
+[현재까지 완료된 것]
+
+1. PC 학습 GUI: smartwave_ocsvm_trainer/smartwave_ocsvm_trainer.py
+
+◦ CNN10 E2E ONNX (smartwave_cnn10_e2e.onnx) 기반
+
+◦ OneClassSVM 학습 + StandardScaler + JSON 내보내기
+
+
+
+2. E2E 모델:models_official/smartwave_cnn10_e2e.onnx (25MB)
+
+◦ 입력 [1,160000] raw audio @16kHz
+
+◦ STFT+Mel 레이어 내장 (PC=Android 100% 정합성)
+
+◦ 출력 [1,527] L2-정규화 임베딩
+
+
+
+3. Android 앱: SmartWaveApp/ (Kotlin)
+
+◦ OnnxInference.kt (onnxruntime-android)
+
+◦ OcsvmEngine.kt (StandardScaler + RBF 커널)
+
+◦ assets/에 모델 파일 배포 완료
+
+
+
+4. MIMII 실제 데이터 검증 완료:
+
+◦ F1 90.8% / AUC 95.8% /이상탐지 87% / 정상통과 95%
+
+◦ 최적 파라미터: gamma=0.001, nu=0.02, N_train=100
+
+◦ ocsvm_params_Pump_MIMII_optimized.json 생성됨
+
+
+
+[다음 할 일]
+
+• Android 실기기 테스트
+
+• Fan/Slider/Valve 설비 추가 검증
+
+• 현장 데이터 수집 후 파인튜닝
+
+──────────────────────────────────────────────────────────
+
+
+
+[B] 성능이 낮을 때 최적화
+
+──────────────────────────────────────────────────────────
+
+SmartWave OCSVM 성능이 낮습니다. 다음 방법으로 최적화해주세요.
+
+
+
+현재 상황:
+
+• 데이터: [정상/이상 파일 수 입력]
+
+• 현재 F1: [현재 성능 입력]%
+
+• gamma: [현재값], nu: [현재값]
+
+
+
+최적화 방법:
+
+1. StandardScaler 적용 후 재학습
+
+2. 확장 그리드 서치: gamma=[0.001,0.005,0.01,0.05,0.1,0.5,1.0]× nu=[0.02,0.05,0.10,0.15,0.20]
+
+3. 학습 샘플 수를 최소 100개로 증가
+
+4. SNR별 균형 샘플링 (있는 경우)
+
+5. Fisher 판별비로 최적 임베딩 방법 비교
+
+
+
+검증 방법: 5-Fold 교차검증, AUC-ROC 포함
+
+목표: F1 90%+, AUC 95%+
+
+
+
+작업 경로: [경로 입력]
+
+──────────────────────────────────────────────────────────
+
+
+
+[C] 새 설비 추가할 때 (Fan, Valve, etc.)
+
+──────────────────────────────────────────────────────────
+
+SmartWave에 [설비명] 설비를 추가해주세요.학습 데이터: [정상 소리 폴더 경로]
+
+설비 특성: [주요 작동 주파수 Hz 입력, 예: Fan=40Hz]
+
+
+
+진행 순서:
+
+1. PC 학습 프로그램에서 새 설비 등록
+
+2. 정상 소리 WAV 파일 30~100개 등록
+
+3. CNN10 E2E 임베딩 추출
+
+4. OCSVM 학습 (gamma=0.001, nu=0.05~0.10, StandardScaler)
+
+5. ocsvm_params_[설비명].json 내보내기
+
+6. Android assets/에 복사
+
+7. 앱에서 설비 선택 → 해당 JSON 자동 로드 확인
+
+
+
+MIMII 검증 데이터 (있는 경우):
+
+Fan: stdt1/MIMII_fan_datasets 또는 유사 HuggingFace 검색
+
+Pump: stdt1/MIMII_pump_datasets_16kHz_RMS_10s_V2 (기검증 완료)
+
+Slider: zenodo.org/record/3384388
+
+──────────────────────────────────────────────────────────
+
+
+
+[D] 딥검증 필요할 때
+
+──────────────────────────────────────────────────────────
+
+SmartWave panns_cnn10_e2e.onnx 모델의 실질기여도를 딥검증해주세요.
+
+
+
+4종 병렬 실험:
+
+1. Ablation Study: mel_stats vs random_proj vs panns_proj vs cnn10_e2e
+
+2. 가중치 구조 분석: 주파수 선택성, Fisher비, 학습 패턴
+
+3. 임베딩 분리도: Fisher 판별비, 클래스간 코사인 유사도
+
+4. 5-Fold 교차검증: 평균 F1, 표준편차, 통계적 유의성
+
+
+
+판정 기준:
+
+• cnn10_e2e > mel_stats > random: E2E 모델 실질 기여 확인
+
+• cnn10_e2e ≈ mel_stats > random: 투영 효과이지만 mel_stats와 동등
+
+• 모두 유사: 임베딩 방법보다 OCSVM 파라미터가 더 중요
+
+
+
+데이터: [작업경로]/dataset/ 또는 MIMII 실제 데이터
+
+──────────────────────────────────────────────────────────
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+핵심 수치 레퍼런스 (검증 완료 기준값)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+
+[MIMII Pump 실제 데이터 최적 결과]
+
+F1: 90.8%
+
+AUC-ROC: 95.8%
+
+정상 통과율: 95.0%
+
+이상 탐지율: 87.0%
+
+전체 정확도:89.7%
+
+TP/TN/FP/FN: 174/95/26/5 (테스트 300건)
+
+
+
+[최적 OCSVM 파라미터]
+
+gamma: 0.001 ← 527-dim E2E, 128-dim mel_stats 둘 다
+
+nu: 0.02 ← MIMII 기준 (합성 데이터는 0.10)
+
+학습샘플: 100개 (정상만)
+
+StandardScaler: 필수
+
+지지벡터: 6개
+
+
+
+[ONNX E2E 모델 사양]
+
+파일: smartwave_cnn10_e2e.onnx (25MB)
+
+입력: [1, 160000] float32 raw audio @16kHz
+
+출력: [1, 527] float32 L2-정규화 임베딩
+
+내부 파이프라인: STFT(conv1d) → Mel → CNN10 4블록 → FC → Sigmoid
+
+결정론적: 동일 입력 → 최대 오차 1e-10 이하
+
+
+
+[JSON 필수 필드]
+
+equipment_name, gamma, nu, rho (= -ocsvm.offset_[0]),
+
+support_vectors, dual_coef, n_support_vectors,
+
+embedding_dim, embedding_mode,
+
+scaler_mean (배열), scaler_scale (배열) ← Android 필수
+
+metrics.f1, metrics.auc[Android OCSVM 판별 수식]
+
+xScaled[i] = (x[i] - scaler_mean[i]) / scaler_scale[i]
+
+f(x) = Σᵢ dual_coef[i] × exp(-gamma × ||xScaled - sv[i]||²) - rho
+
+f(x) ≥ 0 → 정상 / f(x) < 0 → 이상[주요 다운로드 링크]
+
+CNN10 PyTorch: https://huggingface.co/nicofarr/panns_Cnn10
+
+CNN14 TFLite: https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT
+
+MIMII Dataset: https://zenodo.org/record/3384388
+
+MIMII HF 미러: https://huggingface.co/datasets/stdt1/MIMII_pump_datasets_16kHz_RMS_10s_V2
+
+PANNs 논문: https://arxiv.org/abs/1912.10211
+
+
+
+[주요 함정 모음]
+
+1. torch CPU 전용 설치: pip install torch==2.4.1+cpu --index-url .../whl/cpu
+
+(CUDA 버전 설치 시 c10_cuda.dll 충돌)
+
+2. MIMII label 역전: label=1=정상, label=0=이상 (이 HF 데이터셋 기준)
+
+3.MIMII data 접근: data[0] → np.array(list(data[0])) 필요 (dtype 혼재)
+
+3. rho 부호: rho = float(-ocsvm.offset_[0]) ← 반드시 음수 처리
+
+4. gamma 기본값: 527-dim이면 0.001, 128-dim이면 0.1~0.5
+
+5. ONNX opset=14, ir_version=8 (onnxruntime 1.20 호환)
+
+6. Unsqueeze: opset13+ 에서 axes는 별도 input tensor로 전달
+
+7. panns_cnn10_industrial.tflite: 커스텀 바이너리 포맷 (표준 TFLite 아님)
+
+
+
+================================================================
+
+이 파일 하나로 새 PC에서 처음부터 재현 가능
+
+SmartWavev2.0 — CNN10 E2E + OCSVM 산업 이상 감지 AI
+
+검증 완료: F1 90.8% / AUC 95.8% (MIMII 실제 공장 데이터)
