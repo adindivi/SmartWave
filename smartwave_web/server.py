@@ -27,7 +27,7 @@ templates = Jinja2Templates(directory="templates")
 
 TARGET_AUDIO_LEN = 160000
 SAMPLE_RATE = 16000
-EMBEDDING_DIM = 527
+EMBEDDING_DIM = 512
 MAX_FILES = 5000  # Safety cap to prevent OOM on huge folders
 
 
@@ -43,7 +43,7 @@ class SmartWaveBackend:
         self.scaler = None
         self.ocsvm = None
 
-        onnx_path = '../models_official/smartwave_cnn10_e2e.onnx'
+        onnx_path = '../models_official/smartwave_cnn10_e2e_512.onnx'
         if not os.path.exists(onnx_path):
             logger.warning(f"ONNX model not found at {onnx_path}. Engine disabled.")
             return
@@ -60,7 +60,7 @@ class SmartWaveBackend:
         return self.sess is not None
 
     def extract_embedding(self, audio):
-        """Extracts a 527-dim embedding from raw audio. Pads or truncates."""
+        """Extracts a 512-dim embedding from raw audio. Pads or truncates."""
         if len(audio) < TARGET_AUDIO_LEN:
             audio = np.pad(audio, (0, TARGET_AUDIO_LEN - len(audio)))
         else:
@@ -209,8 +209,8 @@ def api_charts():
         yy = np.linspace(y_min, y_max, 20)
         xx_grid, yy_grid = np.meshgrid(xx, yy)
         grid_2d = np.c_[xx_grid.ravel(), yy_grid.ravel()]
-        grid_527 = pca.inverse_transform(grid_2d)
-        Z = backend.ocsvm.decision_function(grid_527).reshape(xx_grid.shape).tolist()
+        grid_512 = pca.inverse_transform(grid_2d)
+        Z = backend.ocsvm.decision_function(grid_512).reshape(xx_grid.shape).tolist()
 
         return {
             "wave_normal": wave_normal,

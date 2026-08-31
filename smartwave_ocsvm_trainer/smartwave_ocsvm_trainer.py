@@ -21,7 +21,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 # Constants
 TARGET_AUDIO_LEN = 160000
 SAMPLE_RATE = 16000
-EMBEDDING_DIM = 527
+EMBEDDING_DIM = 512
 
 # UI Colors (Samsung One UI Inspired / Pro Industrial)
 PRIMARY = "#000000"
@@ -47,7 +47,7 @@ class PANNsEngine:
         self.dim = EMBEDDING_DIM
         self.sess = None
         
-        onnx_path = '../models_official/smartwave_cnn10_e2e.onnx'
+        onnx_path = '../models_official/smartwave_cnn10_e2e_512.onnx'
         if not os.path.exists(onnx_path):
             raise FileNotFoundError(f"ONNX model not found at: {onnx_path}")
             
@@ -378,8 +378,8 @@ class SmartWaveTrainer(tk.Tk):
                 xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
                                      np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
                 grid_2d = np.c_[xx.ravel(), yy.ravel()]
-                grid_527 = pca.inverse_transform(grid_2d)
-                Z = self.ocsvm_cache.decision_function(grid_527)
+                grid_512 = pca.inverse_transform(grid_2d)
+                Z = self.ocsvm_cache.decision_function(grid_512)
                 Z = Z.reshape(xx.shape)
                 
                 ax.contourf(xx, yy, Z, levels=[Z.min(), 0, Z.max()], colors=[DANGER, SUCCESS], alpha=0.15)
@@ -666,8 +666,8 @@ class SmartWaveTrainer(tk.Tk):
             xx, yy = np.meshgrid(np.linspace(X_pca[:, 0].min() - 2, X_pca[:, 0].max() + 2, 50),
                                  np.linspace(X_pca[:, 1].min() - 2, X_pca[:, 1].max() + 2, 50))
             grid_2d = np.c_[xx.ravel(), yy.ravel()]
-            grid_527 = pca.inverse_transform(grid_2d)
-            Z = self.ocsvm_cache.decision_function(grid_527)
+            grid_512 = pca.inverse_transform(grid_2d)
+            Z = self.ocsvm_cache.decision_function(grid_512)
             Z = Z.reshape(xx.shape)
             self.ax_pca.contourf(xx, yy, Z, levels=[Z.min(), 0, Z.max()], colors=[DANGER, SUCCESS], alpha=0.15)
             self.ax_pca.contour(xx, yy, Z, levels=[0], linewidths=2, colors=DANGER)
